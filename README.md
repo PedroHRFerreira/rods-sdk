@@ -33,6 +33,17 @@ context project list
 context project remove <name>
 ```
 
+## Codex Integration
+
+Context Engine also exposes a local MCP server for Codex:
+
+```bash
+npm run build
+context-mcp
+```
+
+See [docs/codex.md](docs/codex.md) for `~/.codex/config.toml` setup and usage.
+
 ## Storage
 
 Default files are stored under:
