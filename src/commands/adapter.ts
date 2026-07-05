@@ -46,11 +46,15 @@ export function registerAdapterCommand(program: Command): void {
     .command('sync')
     .argument('[path]', 'project root path', '.')
     .requiredOption('--target <target>', 'adapter target, currently: codex')
+    .option('--codex-skills-dir <path>', 'Codex skills directory when .agents/skills is not writable')
     .option('--force', 'overwrite generated target files')
     .description('Sync .ai governance files to a supported agent target')
-    .action(async (targetPath: string, options: { target: string; force?: boolean }) => {
+    .action(async (targetPath: string, options: { target: string; codexSkillsDir?: string; force?: boolean }) => {
       const target = parseTarget(options.target);
-      const result = await syncAdapters(path.resolve(targetPath), target, { force: options.force });
+      const result = await syncAdapters(path.resolve(targetPath), target, {
+        codexSkillsDir: options.codexSkillsDir,
+        force: options.force
+      });
 
       console.log(`target=${result.target} files=${result.files.length}`);
 

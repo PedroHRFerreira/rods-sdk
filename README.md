@@ -1,38 +1,73 @@
 # rods-sdk
 
-Agent governance framework with Context Engine retrieval and RTK-first token economy.
+Framework de governança para agentes de código, com recuperação via Context Engine e economia de tokens usando RTK por padrão.
 
-Rods SDK gives coding agents a small, auditable operating layer:
+O Rods SDK entrega uma camada operacional pequena e auditável para agentes:
 
-- Context Engine: indexed project retrieval with SQLite FTS5 chunks.
-- RTK by default: compact shell output for commands, tests, logs and diffs.
-- Skills and governance files: versioned `.ai/` rules that can sync to supported agents.
-- Optional adapters: cross-session memory and terse output modes without making them required dependencies.
-- CLI-first execution: rods-sdk runs through the local harness, MCP, skills and adapters, not through direct AI provider APIs.
+- Context Engine: busca indexada do projeto em chunks com SQLite FTS5.
+- RTK por padrão: compactação de saída de comandos, testes, logs e diffs.
+- Skills e arquivos de governança: regras versionadas em `.ai/` que podem ser sincronizadas com agentes suportados.
+- Adaptadores opcionais: memória entre sessões e modo de resposta curta sem virar dependência obrigatória.
+- Execução CLI-first: o framework roda pelo harness local, MCP, skills e adaptadores, sem chamar APIs de provedores de IA diretamente.
 
-## Install
+## Instalação
 
 ```bash
 npm install
 npm run build
 ```
 
-During development:
+Durante o desenvolvimento:
 
 ```bash
-npm run dev -- search "query"
+npm run dev -- search "termo de busca"
 ```
 
-After build, the package exposes:
+Depois do build, o pacote expõe:
 
 ```bash
 rods --help
 context --help
 ```
 
-`context` remains as a compatibility alias for the same CLI.
+`context` continua existindo como alias de compatibilidade para a mesma CLI.
 
-## Commands
+## Como Rodar O Framework
+
+1. Registre o projeto que será indexado:
+
+```bash
+context project add meu-projeto /caminho/absoluto/do/projeto
+```
+
+2. Indexe o projeto:
+
+```bash
+context ingest /caminho/absoluto/do/projeto
+```
+
+3. Consulte o índice antes de abrir arquivos manualmente:
+
+```bash
+context search "termo de busca" --limit 8
+context read <chunkId>
+context stats
+```
+
+4. Para gerar governança em um projeto consumidor:
+
+```bash
+rods init /caminho/absoluto/do/projeto
+rods adapter sync /caminho/absoluto/do/projeto --target codex
+```
+
+Se `.agents/skills` estiver somente leitura no ambiente, sincronize para um diretório gravável:
+
+```bash
+rods adapter sync /caminho/absoluto/do/projeto --target codex --codex-skills-dir .codex/skills
+```
+
+## Comandos
 
 ```bash
 context ingest <path> [--type file|log|markdown|diff|error|stacktrace|json|sql|http]
@@ -45,24 +80,24 @@ context project remove <name>
 rods init [path] [--force]
 rods adapter list
 rods adapter enable <rtk|claude-mem|caveman> [path] [--force]
-rods adapter sync [path] --target codex [--force]
+rods adapter sync [path] --target codex [--codex-skills-dir <path>] [--force]
 rods adapter doctor [path] [--target codex]
 ```
 
-## Codex Integration
+## Integração Com Codex
 
-Rods SDK exposes the Context Engine MCP server for Codex:
+O Rods SDK expõe o servidor MCP do Context Engine para o Codex:
 
 ```bash
 npm run build
 context-mcp
 ```
 
-See [docs/codex.md](docs/codex.md) for `~/.codex/config.toml` setup and usage.
+Veja [docs/codex.md](docs/codex.md) para configurar o `~/.codex/config.toml` e usar o MCP no Codex.
 
-## Storage
+## Armazenamento
 
-Default files are stored under:
+Por padrão, os arquivos ficam em:
 
 ```text
 ~/.context-engine/
@@ -70,19 +105,19 @@ Default files are stored under:
   db/context.db
 ```
 
-Set `CONTEXT_ENGINE_HOME` to isolate storage for tests or local experiments.
+Defina `CONTEXT_ENGINE_HOME` para isolar o armazenamento em testes ou experimentos locais.
 
-## Token Economy
+## Economia De Tokens
 
-- Files are stored as line chunks, not as single large records.
-- Search returns compact ranked chunk metadata and snippets.
-- `read` requires an explicit chunk id.
-- File hashes are cached to skip unchanged reindexing.
-- The schema reserves embedding metadata fields for future hybrid search without implementing embeddings in the MVP.
+- Arquivos são armazenados em chunks por linha, não como registros gigantes.
+- `search` retorna metadados compactos, ranqueados, com snippets.
+- `read` exige um `chunkId` explícito.
+- Hashes de arquivo são cacheados para pular reindexação do que não mudou.
+- O schema reserva campos de metadados de embedding para busca híbrida futura, sem implementar embeddings no MVP.
 
-## Governance Scaffolding
+## Governança
 
-`rods init` creates project-level governance files without installing external tools:
+`rods init` cria arquivos de governança no projeto sem instalar ferramentas externas:
 
 ```text
 AGENTS.md
@@ -92,11 +127,11 @@ AGENTS.md
 .ai/adapters/rtk.md
 ```
 
-`.ai/` is the versioned source of truth. `rods adapter sync --target codex` copies `.ai/skills/*/SKILL.md` into `.agents/skills/` for Codex-local consumption.
+`.ai/` é a fonte versionada da verdade. `rods adapter sync --target codex` copia `.ai/skills/*/SKILL.md` para `.agents/skills/`, permitindo consumo local pelo Codex quando esse diretório for gravável.
 
-RTK is enabled by default in `.ai/config.json`. Run `rtk init -g --codex` separately when you want RTK to install its own Codex integration.
+RTK vem habilitado por padrão em `.ai/config.json`. Rode `rtk init -g --codex` separadamente quando quiser que o RTK instale sua própria integração com o Codex.
 
-Execution is CLI-first by default:
+A execução é CLI-first por padrão:
 
 ```json
 {
@@ -107,12 +142,12 @@ Execution is CLI-first by default:
 }
 ```
 
-## Optional Adapters
+## Adaptadores Opcionais
 
-Adapters document and validate optional tools. They are not bundled dependencies and rods-sdk does not reimplement their behavior.
+Adaptadores documentam e validam ferramentas opcionais. Eles não são dependências embutidas, e o rods-sdk não reimplementa o comportamento dessas ferramentas.
 
-- `rtk`: default shell command output compaction.
-- `claude-mem`: persistent memory across sessions.
-- `caveman`: opt-in terse agent output.
+- `rtk`: compactação padrão de saída de comandos.
+- `claude-mem`: memória persistente entre sessões.
+- `caveman`: saída curta, ativada somente por opção.
 
-Use `rods adapter enable <name>` to mark intent in `.ai/config.json` and generate `.ai/adapters/<name>.md`. Use `rods adapter doctor` to check installation, detected config, hooks, MCP signals, and possible conflicts.
+Use `rods adapter enable <name>` para registrar a intenção em `.ai/config.json` e gerar `.ai/adapters/<name>.md`. Use `rods adapter doctor` para verificar instalação, configuração detectada, hooks, sinais MCP e possíveis conflitos.

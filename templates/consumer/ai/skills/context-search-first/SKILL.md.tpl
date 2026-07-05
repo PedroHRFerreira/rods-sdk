@@ -17,4 +17,3 @@ description: Use when starting a task in this repository before reading files ma
 2. Read only relevant chunks with `context_engine.read`.
 3. Open local files only when the indexed chunks are insufficient.
 4. If local fallback found missing context, call `context_engine.ingest` for that file or directory.
-

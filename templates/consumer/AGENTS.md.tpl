@@ -11,6 +11,36 @@ Use rods-sdk defaults before reading large files, running noisy commands, or sca
 5. Fall back to local file reads only when the index is missing or stale.
 6. If fallback local reads solved the task, run `context_engine.ingest` on the relevant file or directory before finishing.
 
+## Running The Framework
+
+Prepare a consumer project:
+
+```bash
+pnpm exec rods init
+pnpm exec rods adapter sync --target codex
+```
+
+If `.agents/skills` is read-only, sync skills to a writable destination:
+
+```bash
+pnpm exec rods adapter sync --target codex --codex-skills-dir .codex/skills
+```
+
+Register and index the project in Context Engine:
+
+```bash
+pnpm exec rods project add {{projectName}} .
+pnpm exec rods ingest .
+pnpm exec rods stats
+```
+
+Search indexed context:
+
+```bash
+pnpm exec rods search "search term"
+pnpm exec rods read <chunkId>
+```
+
 ## Governance
 
 Project governance lives in `.ai/`.

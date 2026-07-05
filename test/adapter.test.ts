@@ -45,6 +45,27 @@ test('syncAdapters copies .ai skills to the Codex .agents skills directory', asy
   assert.match(syncedSkill, /Context Search First/);
 });
 
+test('syncAdapters can copy Codex skills to a custom writable directory', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-sync-custom-'));
+  await initProject(root);
+  await fs.mkdir(path.join(root, '.agents'));
+  await fs.chmod(path.join(root, '.agents'), 0o555);
+
+  try {
+    const result = await syncAdapters(root, 'codex', { codexSkillsDir: '.codex/skills' });
+    const syncedSkill = await fs.readFile(
+      path.join(root, '.codex', 'skills', 'context-search-first', 'SKILL.md'),
+      'utf8'
+    );
+
+    assert.equal(result.target, 'codex');
+    assert.equal(result.files.length, 1);
+    assert.match(syncedSkill, /Context Search First/);
+  } finally {
+    await fs.chmod(path.join(root, '.agents'), 0o755);
+  }
+});
+
 test('doctorAdapters reports binary checks and Codex configuration signals', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-doctor-'));
   const binDir = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-bin-'));

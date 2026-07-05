@@ -1,22 +1,22 @@
-# Using rods-sdk With Codex
+# Usando rods-sdk Com Codex
 
-Rods SDK can run Context Engine as a local MCP server so Codex can search indexed project memory before reading files. RTK is the default command-output adapter, but RTK installation stays external and optional. Execution stays CLI-first through Codex, MCP, skills and local adapters; rods-sdk does not call AI provider APIs directly.
+O Rods SDK permite rodar o Context Engine como servidor MCP local para o Codex buscar memória indexada do projeto antes de abrir arquivos. O RTK é o adaptador padrão para compactar saída de comandos, mas sua instalação continua externa e opcional. A execução permanece CLI-first por Codex, MCP, skills e adaptadores locais; o rods-sdk não chama APIs de provedores de IA diretamente.
 
-## Flow
+## Fluxo
 
 ```text
-Codex chat
-  -> context-engine MCP tool
+Chat do Codex
+  -> ferramenta MCP context_engine
   -> ~/.context-engine/db/context.db
-  -> ranked chunks
-  -> Codex answer or code edit
+  -> chunks ranqueados
+  -> resposta ou edição de código pelo Codex
 ```
 
-Codex does not send your whole repository to the model. It calls tools such as `search` and `read`, then includes only the selected chunks in the active turn.
+O Codex não envia o repositório inteiro para o modelo. Ele chama ferramentas como `search` e `read`, depois inclui apenas os chunks selecionados no turno ativo.
 
-## Local Setup
+## Instalação Local
 
-Clone and build the project on your notebook:
+Clone e compile o projeto na sua máquina:
 
 ```bash
 git clone https://github.com/PedroHRFerreira/rods-sdk.git
@@ -25,22 +25,30 @@ npm install
 npm run build
 ```
 
-Index a project:
+Registre e indexe um projeto:
 
 ```bash
-./bin/context project add my-project /absolute/path/to/my-project
-./bin/context ingest /absolute/path/to/my-project
+./bin/context project add meu-projeto /caminho/absoluto/do/projeto
+./bin/context ingest /caminho/absoluto/do/projeto
+./bin/context stats
 ```
 
-## Connect Codex
+Pesquise no índice:
 
-Add this to `~/.codex/config.toml`:
+```bash
+./bin/context search "erro no checkout"
+./bin/context read <chunkId>
+```
+
+## Conectar O Codex
+
+Adicione isto ao `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.context_engine]
 command = "node"
-args = ["/absolute/path/to/rods-sdk/dist/mcp/server.js"]
-cwd = "/absolute/path/to/rods-sdk"
+args = ["/caminho/absoluto/para/rods-sdk/dist/mcp/server.js"]
+cwd = "/caminho/absoluto/para/rods-sdk"
 startup_timeout_sec = 20
 tool_timeout_sec = 60
 enabled = true
@@ -55,46 +63,79 @@ approval_mode = "approve"
 approval_mode = "approve"
 ```
 
-Or add it with the Codex CLI:
+Ou adicione pela CLI do Codex:
 
 ```bash
-codex mcp add context_engine -- node /absolute/path/to/rods-sdk/dist/mcp/server.js
+codex mcp add context_engine -- node /caminho/absoluto/para/rods-sdk/dist/mcp/server.js
 ```
 
-Restart Codex after changing MCP configuration. In the Codex TUI, run `/mcp` to confirm the server is active.
+Reinicie o Codex depois de alterar a configuração MCP. No TUI do Codex, rode `/mcp` para confirmar que o servidor está ativo.
 
-## How To Use In Chat
+## Usar Em Um Projeto Consumidor
 
-Ask normally, but mention Context Engine when you want to force the path:
-
-```text
-Use context_engine to search my indexed project before answering.
-```
-
-Useful first prompts:
-
-```text
-Use context_engine.search to find context about checkout errors.
-Use context_engine.ingest on this project, then search for upload banner.
-Read only the chunks needed from context_engine.
-```
-
-## Available Tools
-
-- `search`: find relevant chunks by text.
-- `read`: read one chunk by id.
-- `ingest`: index a file or directory.
-- `stats`: show compact database stats.
-- `projects`: list registered projects.
-- `project_add`: register a project root.
-
-## Governance Files
-
-For a project that should carry rods-sdk governance, run:
+Dentro do projeto que deve carregar a governança do rods-sdk:
 
 ```bash
-rods init /absolute/path/to/project
-rods adapter sync /absolute/path/to/project --target codex
+pnpm exec rods init
+pnpm exec rods adapter sync --target codex
 ```
 
-This creates `.ai/` as the versioned source of truth and syncs `.ai/skills/*/SKILL.md` into `.agents/skills/` for Codex. RTK is enabled by default in `.ai/config.json`; install RTK separately with `rtk init -g --codex` when you want command-output interception. Optional external tools such as `claude-mem` and `caveman` are enabled with `rods adapter enable <name>` and checked with `rods adapter doctor`.
+Isso cria `.ai/` como fonte versionada da verdade e sincroniza `.ai/skills/*/SKILL.md` para `.agents/skills/` quando o diretório for gravável.
+
+Se `.agents/skills` estiver somente leitura, use um destino gravável:
+
+```bash
+pnpm exec rods adapter sync --target codex --codex-skills-dir .codex/skills
+```
+
+Depois disso, confirme que a skill foi criada:
+
+```bash
+ls .codex/skills/context-search-first/SKILL.md
+```
+
+## Como Usar No Chat
+
+Peça normalmente, mas mencione Context Engine quando quiser forçar esse caminho:
+
+```text
+Use context_engine para buscar no projeto indexado antes de responder.
+```
+
+Prompts úteis:
+
+```text
+Use context_engine.search para achar contexto sobre erros no checkout.
+Use context_engine.ingest neste projeto e depois busque por upload banner.
+Leia somente os chunks necessários com context_engine.read.
+```
+
+## Ferramentas Disponíveis
+
+- `search`: encontra chunks relevantes por texto.
+- `read`: lê um chunk por id.
+- `ingest`: indexa um arquivo ou diretório.
+- `stats`: mostra estatísticas compactas do banco.
+- `projects`: lista projetos registrados.
+- `project_add`: registra a raiz de um projeto.
+
+## Arquivos De Governança
+
+Para um projeto que deve carregar governança do rods-sdk, rode:
+
+```bash
+rods init /caminho/absoluto/do/projeto
+rods adapter sync /caminho/absoluto/do/projeto --target codex
+```
+
+O `rods init` cria:
+
+```text
+AGENTS.md
+.ai/config.json
+.ai/constitution.md
+.ai/skills/context-search-first/SKILL.md
+.ai/adapters/rtk.md
+```
+
+O RTK vem habilitado por padrão em `.ai/config.json`; instale o RTK separadamente com `rtk init -g --codex` quando quiser interceptação/compactação de saída de comandos. Ferramentas externas opcionais como `claude-mem` e `caveman` são habilitadas com `rods adapter enable <name>` e verificadas com `rods adapter doctor`.

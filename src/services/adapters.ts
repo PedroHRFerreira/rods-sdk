@@ -50,6 +50,11 @@ export interface IAdapterSyncResult {
   files: IFileWriteResult[];
 }
 
+export interface IAdapterSyncOptions {
+  force?: boolean;
+  codexSkillsDir?: string;
+}
+
 export interface ICommandCheck {
   command: string;
   ok: boolean;
@@ -151,7 +156,7 @@ export async function enableAdapter(
 export async function syncAdapters(
   root: string,
   target: AdapterTarget,
-  options: { force?: boolean } = {}
+  options: IAdapterSyncOptions = {}
 ): Promise<IAdapterSyncResult> {
   if (target !== 'codex') {
     throw new Error(`Unsupported adapter target: ${target}`);
@@ -159,7 +164,9 @@ export async function syncAdapters(
 
   const resolvedRoot = path.resolve(root);
   const sourceSkillsDir = path.join(resolvedRoot, '.ai', 'skills');
-  const destinationSkillsDir = path.join(resolvedRoot, '.agents', 'skills');
+  const destinationSkillsDir = options.codexSkillsDir
+    ? path.resolve(resolvedRoot, options.codexSkillsDir)
+    : path.join(resolvedRoot, '.agents', 'skills');
   const files: IFileWriteResult[] = [];
 
   if (!(await pathExists(sourceSkillsDir))) {
