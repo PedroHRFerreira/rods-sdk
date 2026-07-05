@@ -1,6 +1,6 @@
-# Using Context Engine With Codex
+# Using rods-sdk With Codex
 
-Context Engine can run as a local MCP server so Codex can search your indexed project memory before reading files.
+Rods SDK can run Context Engine as a local MCP server so Codex can search indexed project memory before reading files. RTK is the default command-output adapter, but RTK installation stays external and optional. Execution stays CLI-first through Codex, MCP, skills and local adapters; rods-sdk does not call AI provider APIs directly.
 
 ## Flow
 
@@ -19,8 +19,8 @@ Codex does not send your whole repository to the model. It calls tools such as `
 Clone and build the project on your notebook:
 
 ```bash
-git clone https://github.com/PedroHRFerreira/context-engine.git
-cd context-engine
+git clone https://github.com/PedroHRFerreira/rods-sdk.git
+cd rods-sdk
 npm install
 npm run build
 ```
@@ -39,8 +39,8 @@ Add this to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.context_engine]
 command = "node"
-args = ["/absolute/path/to/context-engine/dist/mcp/server.js"]
-cwd = "/absolute/path/to/context-engine"
+args = ["/absolute/path/to/rods-sdk/dist/mcp/server.js"]
+cwd = "/absolute/path/to/rods-sdk"
 startup_timeout_sec = 20
 tool_timeout_sec = 60
 enabled = true
@@ -58,7 +58,7 @@ approval_mode = "approve"
 Or add it with the Codex CLI:
 
 ```bash
-codex mcp add context_engine -- node /absolute/path/to/context-engine/dist/mcp/server.js
+codex mcp add context_engine -- node /absolute/path/to/rods-sdk/dist/mcp/server.js
 ```
 
 Restart Codex after changing MCP configuration. In the Codex TUI, run `/mcp` to confirm the server is active.
@@ -87,3 +87,14 @@ Read only the chunks needed from context_engine.
 - `stats`: show compact database stats.
 - `projects`: list registered projects.
 - `project_add`: register a project root.
+
+## Governance Files
+
+For a project that should carry rods-sdk governance, run:
+
+```bash
+rods init /absolute/path/to/project
+rods adapter sync /absolute/path/to/project --target codex
+```
+
+This creates `.ai/` as the versioned source of truth and syncs `.ai/skills/*/SKILL.md` into `.agents/skills/` for Codex. RTK is enabled by default in `.ai/config.json`; install RTK separately with `rtk init -g --codex` when you want command-output interception. Optional external tools such as `claude-mem` and `caveman` are enabled with `rods adapter enable <name>` and checked with `rods adapter doctor`.
