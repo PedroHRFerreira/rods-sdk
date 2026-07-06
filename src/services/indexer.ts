@@ -74,9 +74,9 @@ export class IndexerService {
     const fileHash = sha256(buffer);
     const kind = detectKind(filePath, options.type);
     const scope = normalizeScope(options.scope);
-    const cacheKey = `file:${scope}:${filePath}:${kind}`;
+    const cacheKey = `file:${filePath}:${kind}`;
 
-    if (this.db.getCache(cacheKey) === fileHash) {
+    if (this.db.getCache(cacheKey, scope) === fileHash) {
       return { skipped: true, chunks: 0 };
     }
 
@@ -96,7 +96,7 @@ export class IndexerService {
     }));
 
     const insertedChunks = this.db.replaceChunksForPath(filePath, chunks);
-    this.db.setCache(cacheKey, fileHash);
+    this.db.setCache(cacheKey, fileHash, scope);
 
     return { skipped: false, chunks: insertedChunks };
   }

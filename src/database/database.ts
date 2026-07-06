@@ -75,25 +75,27 @@ export class ContextDatabase {
     );
   }
 
-  getCache(key: string): string | null {
-    const row = this.db.prepare('SELECT value FROM cache WHERE key = ?').get(key) as ICacheRow | undefined;
+  getCache(key: string, scope = 'general'): string | null {
+    const row = this.db.prepare('SELECT value FROM cache WHERE key = ? AND scope = ?').get(key, scope) as
+      | ICacheRow
+      | undefined;
     return row?.value ?? null;
   }
 
-  setCache(key: string, value: string): void {
+  setCache(key: string, value: string, scope = 'general'): void {
     const now = new Date().toISOString();
 
     this.db
       .prepare(
         `
-        INSERT INTO cache (key, value, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET
+        INSERT INTO cache (key, scope, value, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(key, scope) DO UPDATE SET
           value = excluded.value,
           updatedAt = excluded.updatedAt
       `
       )
-      .run(key, value, now, now);
+      .run(key, scope, value, now, now);
   }
 
   replaceChunksForPath(filePath: string, chunks: IChunkInput[]): number {

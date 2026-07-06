@@ -37,10 +37,12 @@ export function runMigrations(db: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS cache (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      key TEXT NOT NULL UNIQUE,
+      key TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'general',
       value TEXT NOT NULL,
       createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL
+      updatedAt TEXT NOT NULL,
+      UNIQUE(key, scope)
     );
 
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -56,7 +58,9 @@ export function runMigrations(db: Database.Database): void {
   `);
 
   migrateScope(db);
+  migrateCacheScope(db);
   db.exec('CREATE INDEX IF NOT EXISTS idx_chunks_scope ON chunks(scope)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_cache_scope ON cache(scope)');
   createChunkTriggers(db);
 }
 
@@ -92,6 +96,32 @@ function migrateScope(db: Database.Database): void {
   }
 
   db.exec("UPDATE chunks SET scope = 'general' WHERE scope IS NULL OR scope = ''");
+}
+
+function migrateCacheScope(db: Database.Database): void {
+  const cacheColumns = db.prepare('PRAGMA table_info(cache)').all() as Array<{ name: string }>;
+  const hasCacheScope = cacheColumns.some((column) => column.name === 'scope');
+
+  if (hasCacheScope) {
+    db.exec("UPDATE cache SET scope = 'general' WHERE scope IS NULL OR scope = ''");
+    return;
+  }
+
+  db.exec(`
+    ALTER TABLE cache RENAME TO cache_legacy;
+    CREATE TABLE cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'general',
+      value TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      UNIQUE(key, scope)
+    );
+    INSERT INTO cache (id, key, scope, value, createdAt, updatedAt)
+    SELECT id, key, 'general', value, createdAt, updatedAt FROM cache_legacy;
+    DROP TABLE cache_legacy;
+  `);
 }
 
 function createChunkTriggers(db: Database.Database): void {

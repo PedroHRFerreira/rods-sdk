@@ -47,6 +47,7 @@ Esta versão adiciona automação de governança, atualização seletiva de temp
 | Skills | Foram adicionadas skills de `review`, `architecture` e `quality`. | Agentes passam a ter regras versionadas para revisão, arquitetura e validação. |
 | Context Engine | `ingest` e `search` aceitam `--scope`, com `general` como padrão e `review` para revisão. | Contextos de revisão ficam isolados do índice geral sem criar outro projeto. |
 | Migração SQLite | Bancos antigos recebem backfill de `scope=general`. | Bases já indexadas continuam funcionando após o upgrade. |
+| Fluxo de cards externos | Casos de eval documentam quando perguntar antes de buscar contexto. | Evita inferir requisitos de links externos sem confirmação. |
 
 ## Atualizar Projetos Consumidores
 
@@ -162,6 +163,8 @@ context-mcp
 ```
 
 Veja [docs/codex.md](docs/codex.md) para configurar o `~/.codex/config.toml` e usar o MCP no Codex.
+
+Veja [docs/evals.md](docs/evals.md) para os casos de eval da regra de card/link com dependência externa.
 
 ## Armazenamento
 

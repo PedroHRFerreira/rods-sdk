@@ -36,10 +36,19 @@ test('runMigrations backfills scope for pre-scope databases without data loss', 
         content='chunks',
         content_rowid='id'
       );
+      CREATE TABLE cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL UNIQUE,
+        value TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
       INSERT INTO chunks (path, kind, language, startLine, endLine, hash, content, createdAt)
       VALUES ('/tmp/file.ts', 'file', 'typescript', 1, 1, 'hash', 'legacy token', '2026-01-01T00:00:00.000Z');
       INSERT INTO chunks_fts(rowid, content, path, kind, language)
       VALUES (1, 'legacy token', '/tmp/file.ts', 'file', 'typescript');
+      INSERT INTO cache (key, value, createdAt, updatedAt)
+      VALUES ('file:/tmp/file.ts:file', 'hash', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
     `);
 
     runMigrations(db);
@@ -49,10 +58,16 @@ test('runMigrations backfills scope for pre-scope databases without data loss', 
       content: string;
     };
     const fts = db.prepare("SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'legacy*'").all();
+    const cache = db.prepare("SELECT scope, value FROM cache WHERE key = 'file:/tmp/file.ts:file'").get() as {
+      scope: string;
+      value: string;
+    };
 
     assert.equal(row.scope, 'general');
     assert.equal(row.content, 'legacy token');
     assert.equal(fts.length, 1);
+    assert.equal(cache.scope, 'general');
+    assert.equal(cache.value, 'hash');
   } finally {
     db.close();
   }
