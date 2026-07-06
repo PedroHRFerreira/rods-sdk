@@ -13,10 +13,16 @@ test('adapter catalog excludes context-mode and keeps rtk as the default adapter
     adapters.map((adapter) => adapter.name),
     ['rtk', 'claude-mem', 'caveman']
   );
+  const targets = listAdapterTargets();
+
   assert.deepEqual(
-    listAdapterTargets().map((target) => target.id),
+    targets.map((target) => target.id),
     ['codex', 'claude']
   );
+  assert.ok(targets.every((target) => typeof target.hookPath === 'function'));
+  assert.ok(targets.every((target) => typeof target.projectionFn === 'function'));
+  assert.ok(targets.every((target) => typeof target.syncFn === 'function'));
+  assert.ok(targets.every((target) => typeof target.doctorFn === 'function'));
 });
 
 test('enableAdapter updates .ai/config.json and writes the adapter note', async () => {

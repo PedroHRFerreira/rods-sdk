@@ -133,26 +133,26 @@ export interface ITargetIntegrationState {
 
 export interface IAdapterTargetDefinition {
   id: AdapterTarget;
-  hookTemplate: string;
   hookPath(root: string, options: IAdapterSyncOptions | IAdapterDoctorOptions): string;
-  sync(root: string, options: IAdapterSyncOptions): Promise<IFileWriteResult[]>;
-  readState(root: string, options: IAdapterDoctorOptions): Promise<ITargetIntegrationState>;
+  projectionFn(): Promise<string>;
+  syncFn(root: string, options: IAdapterSyncOptions): Promise<IFileWriteResult[]>;
+  doctorFn(root: string, options: IAdapterDoctorOptions): Promise<ITargetIntegrationState>;
 }
 
 const TARGET_REGISTRY: Record<AdapterTarget, IAdapterTargetDefinition> = {
   codex: {
     id: 'codex',
-    hookTemplate: 'codex.md',
     hookPath: (_root, options) => path.join(options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'RTK.md'),
-    sync: syncCodexTarget,
-    readState: readCodexIntegrationState
+    projectionFn: () => renderHookTemplate('codex.md'),
+    syncFn: syncCodexTarget,
+    doctorFn: readCodexIntegrationState
   },
   claude: {
     id: 'claude',
-    hookTemplate: 'claude.md',
     hookPath: (root) => path.join(root, 'CLAUDE.md'),
-    sync: syncClaudeTarget,
-    readState: readClaudeIntegrationState
+    projectionFn: () => renderHookTemplate('claude.md'),
+    syncFn: syncClaudeTarget,
+    doctorFn: readClaudeIntegrationState
   }
 };
 
@@ -211,7 +211,7 @@ export async function syncAdapters(
     throw new Error(`Unsupported adapter target: ${target}`);
   }
 
-  const files = await definition.sync(resolvedRoot, options);
+  const files = await definition.syncFn(resolvedRoot, options);
 
   return { target, files };
 }
@@ -274,7 +274,7 @@ export async function doctorAdapters(
 
   const resolvedRoot = path.resolve(root);
   const config = await loadGovernanceConfig(resolvedRoot);
-  const integrationState = await definition.readState(resolvedRoot, options);
+  const integrationState = await definition.doctorFn(resolvedRoot, options);
   const reports: IAdapterDoctorReport[] = [];
 
   for (const adapter of listAdapters()) {
@@ -487,7 +487,7 @@ async function writeTargetHook(
   options: IAdapterSyncOptions
 ): Promise<IFileWriteResult> {
   const hookPath = target.hookPath(root, options);
-  const content = await renderHookTemplate(target.hookTemplate);
+  const content = await target.projectionFn();
   const exists = await pathExists(hookPath);
 
   if (exists && !options.force) {

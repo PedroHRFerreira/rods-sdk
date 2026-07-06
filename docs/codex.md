@@ -126,6 +126,7 @@ Para um projeto que deve carregar governança do rods-sdk, rode:
 ```bash
 rods init /caminho/absoluto/do/projeto
 rods adapter sync /caminho/absoluto/do/projeto --target codex
+rods adapter sync /caminho/absoluto/do/projeto --target claude
 ```
 
 O `rods init` cria:
@@ -135,7 +136,10 @@ AGENTS.md
 .ai/config.json
 .ai/constitution.md
 .ai/skills/context-search-first/SKILL.md
+.ai/skills/review/SKILL.md
+.ai/skills/architecture/SKILL.md
+.ai/skills/quality/SKILL.md
 .ai/adapters/rtk.md
 ```
 
-O RTK vem habilitado por padrão em `.ai/config.json`; instale o RTK separadamente com `rtk init -g --codex` quando quiser interceptação/compactação de saída de comandos. Ferramentas externas opcionais como `claude-mem` e `caveman` são habilitadas com `rods adapter enable <name>` e verificadas com `rods adapter doctor`.
+O RTK vem habilitado por padrão em `.ai/config.json`; `rods init` escreve/mescla a projeção Codex em `~/.codex/RTK.md` e roda doctor para sinalizar falhas. Ferramentas externas opcionais como `claude-mem` e `caveman` são habilitadas com `rods adapter enable <name>` e verificadas com `rods adapter doctor`.

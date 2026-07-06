@@ -66,3 +66,17 @@ test('upgradeProject supports dry-run and reports customized generated files', a
   assert.equal(agentsForced?.status, 'overwritten');
   assert.match(await fs.readFile(path.join(root, 'AGENTS.md'), 'utf8'), /Rods SDK Defaults/);
 });
+
+test('initProject detects stack from lockfiles and Go files', async () => {
+  const nodeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'context-stack-node-'));
+  await fs.writeFile(path.join(nodeRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  await initProject(nodeRoot);
+
+  assert.match(await fs.readFile(path.join(nodeRoot, 'AGENTS.md'), 'utf8'), /Detected stack: Node\/TypeScript/);
+
+  const goRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'context-stack-go-'));
+  await fs.writeFile(path.join(goRoot, 'main.go'), 'package main\n');
+  await initProject(goRoot);
+
+  assert.match(await fs.readFile(path.join(goRoot, 'AGENTS.md'), 'utf8'), /Detected stack: Go/);
+});

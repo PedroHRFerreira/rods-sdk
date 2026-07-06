@@ -264,11 +264,21 @@ async function detectProjectStack(root: string): Promise<{ label: string; hasFro
   const goModPath = path.join(root, 'go.mod');
   const packageJson = await readJsonFile(packageJsonPath);
   const packageText = packageJson ? JSON.stringify(packageJson).toLowerCase() : '';
-  const hasGo = await pathExists(goModPath);
-  const hasNuxt = packageText.includes('"nuxt"') || (await pathExists(path.join(root, 'nuxt.config.ts')));
-  const hasNext = packageText.includes('"next"') || (await pathExists(path.join(root, 'next.config.js')));
+  const rootFiles = await listRootFiles(root);
+  const hasNodeLockfile = rootFiles.some((file) =>
+    ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock'].includes(file)
+  );
+  const hasGoFile = rootFiles.some((file) => file.endsWith('.go'));
+  const hasGo = (await pathExists(goModPath)) || hasGoFile;
+  const hasNuxt =
+    packageText.includes('"nuxt"') ||
+    (await anyPathExists(root, ['nuxt.config.ts', 'nuxt.config.js', 'nuxt.config.mjs']));
+  const hasNext =
+    packageText.includes('"next"') ||
+    (await anyPathExists(root, ['next.config.js', 'next.config.mjs', 'next.config.ts']));
+  const hasVite = packageText.includes('"vite"') || (await anyPathExists(root, ['vite.config.ts', 'vite.config.js']));
   const hasVue = packageText.includes('"vue"') || hasNuxt;
-  const hasReact = packageText.includes('"react"') || hasNext;
+  const hasReact = packageText.includes('"react"') || hasNext || (hasVite && packageText.includes('@vitejs/plugin-react'));
 
   if (hasNuxt) {
     return { label: 'Nuxt/Vue TypeScript', hasFrontend: true };
@@ -286,11 +296,33 @@ async function detectProjectStack(root: string): Promise<{ label: string; hasFro
     return { label: 'React TypeScript', hasFrontend: true };
   }
 
+  if (hasVite || hasNodeLockfile || packageJson) {
+    return { label: 'Node/TypeScript', hasFrontend: hasVite };
+  }
+
   if (hasGo) {
     return { label: 'Go', hasFrontend: false };
   }
 
   return { label: 'Generic', hasFrontend: false };
+}
+
+async function anyPathExists(root: string, relativePaths: string[]): Promise<boolean> {
+  for (const relativePath of relativePaths) {
+    if (await pathExists(path.join(root, relativePath))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function listRootFiles(root: string): Promise<string[]> {
+  try {
+    return await fs.readdir(root);
+  } catch {
+    return [];
+  }
 }
 
 async function readJsonFile(filePath: string): Promise<unknown | null> {
