@@ -6,6 +6,7 @@ import { registerProjectsCommand } from './commands/projects.js';
 import { registerReadCommand } from './commands/read.js';
 import { registerSearchCommand } from './commands/search.js';
 import { registerStatsCommand } from './commands/stats.js';
+import { registerUpgradeCommand } from './commands/upgrade.js';
 
 const program = new Command();
 
@@ -22,6 +23,7 @@ registerStatsCommand(program);
 registerProjectsCommand(program);
 registerInitCommand(program);
 registerAdapterCommand(program);
+registerUpgradeCommand(program);
 
 try {
   await program.parseAsync(process.argv);

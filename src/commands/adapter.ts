@@ -3,8 +3,11 @@ import type { Command } from 'commander';
 import {
   doctorAdapters,
   enableAdapter,
+  isAdapterTarget,
+  listAdapterTargets,
   isAdapterName,
   listAdapters,
+  loadGovernanceConfig,
   syncAdapters,
   type AdapterTarget
 } from '../services/adapters.js';
@@ -20,6 +23,9 @@ export function registerAdapterCommand(program: Command): void {
         console.log(
           `name=${definition.name} phase=${definition.phase} setup="${definition.codexSetup}" description="${definition.description}"`
         );
+      }
+      for (const target of listAdapterTargets()) {
+        console.log(`target=${target.id}`);
       }
     });
 
@@ -45,7 +51,7 @@ export function registerAdapterCommand(program: Command): void {
   adapter
     .command('sync')
     .argument('[path]', 'project root path', '.')
-    .requiredOption('--target <target>', 'adapter target, currently: codex')
+    .requiredOption('--target <target>', 'adapter target: codex or claude')
     .option('--codex-skills-dir <path>', 'Codex skills directory when .agents/skills is not writable')
     .option('--force', 'overwrite generated target files')
     .description('Sync .ai governance files to a supported agent target')
@@ -66,35 +72,40 @@ export function registerAdapterCommand(program: Command): void {
   adapter
     .command('doctor')
     .argument('[path]', 'project root path', '.')
-    .option('--target <target>', 'adapter target, currently: codex', 'codex')
+    .option('--target <target>', 'adapter target: codex or claude')
     .description('Check optional adapter installation and configuration')
-    .action(async (targetPath: string, options: { target: string }) => {
-      const target = parseTarget(options.target);
-      const reports = await doctorAdapters(path.resolve(targetPath), { target });
+    .action(async (targetPath: string, options: { target?: string }) => {
+      const root = path.resolve(targetPath);
+      const targets = options.target ? [parseTarget(options.target)] : await getConfiguredTargets(root);
       let hasFailure = false;
 
-      for (const report of reports) {
-        console.log(
-          [
-            `adapter=${report.name}`,
-            `enabled=${report.enabled}`,
-            `installed=${report.installed}`,
-            `version="${report.version ?? ''}"`,
-            `config=${report.configDetected}`,
-            `hooks=${report.hooksDetected}`,
-            `mcp=${report.mcpDetected}`,
-            `conflict="${report.conflict}"`
-          ].join(' ')
-        );
+      for (const target of targets) {
+        const reports = await doctorAdapters(root, { target });
 
-        for (const check of report.checks) {
+        for (const report of reports) {
           console.log(
-            `check="${check.command}" ok=${check.ok} output="${check.output ?? ''}" error="${check.error ?? ''}"`
+            [
+              `target=${target}`,
+              `adapter=${report.name}`,
+              `enabled=${report.enabled}`,
+              `installed=${report.installed}`,
+              `version="${report.version ?? ''}"`,
+              `config=${report.configDetected}`,
+              `hooks=${report.hooksDetected}`,
+              `mcp=${report.mcpDetected}`,
+              `conflict="${report.conflict}"`
+            ].join(' ')
           );
-        }
 
-        if (report.enabled && !report.installed) {
-          hasFailure = true;
+          for (const check of report.checks) {
+            console.log(
+              `target=${target} check="${check.command}" ok=${check.ok} output="${check.output ?? ''}" error="${check.error ?? ''}"`
+            );
+          }
+
+          if (report.enabled && !report.installed) {
+            hasFailure = true;
+          }
         }
       }
 
@@ -105,9 +116,18 @@ export function registerAdapterCommand(program: Command): void {
 }
 
 function parseTarget(input: string): AdapterTarget {
-  if (input === 'codex') {
+  if (isAdapterTarget(input)) {
     return input;
   }
 
   throw new Error(`Unsupported adapter target: ${input}`);
+}
+
+async function getConfiguredTargets(root: string): Promise<AdapterTarget[]> {
+  const config = await loadGovernanceConfig(root);
+  const targets = listAdapterTargets()
+    .map((target) => target.id)
+    .filter((target) => config.targets[target]?.enabled);
+
+  return targets.length > 0 ? targets : [config.defaultTarget];
 }

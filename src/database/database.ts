@@ -97,13 +97,15 @@ export class ContextDatabase {
   }
 
   replaceChunksForPath(filePath: string, chunks: IChunkInput[]): number {
+    const scope = chunks[0]?.scope ?? 'general';
     const replace = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM chunks WHERE path = ?').run(filePath);
+      this.db.prepare('DELETE FROM chunks WHERE path = ? AND scope = ?').run(filePath, scope);
 
       const statement = this.db.prepare(`
         INSERT INTO chunks (
           projectId,
           path,
+          scope,
           kind,
           language,
           startLine,
@@ -112,7 +114,7 @@ export class ContextDatabase {
           content,
           createdAt
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const now = new Date().toISOString();
@@ -121,6 +123,7 @@ export class ContextDatabase {
         statement.run(
           chunk.projectId,
           chunk.path,
+          chunk.scope,
           chunk.kind,
           chunk.language,
           chunk.startLine,
@@ -141,6 +144,10 @@ export class ContextDatabase {
   }
 
   search(query: string, limit: number): ISearchResult[] {
+    return this.searchScoped(query, limit, 'general');
+  }
+
+  searchScoped(query: string, limit: number, scope = 'general'): ISearchResult[] {
     const ftsQuery = toFtsQuery(query);
 
     if (!ftsQuery) {
@@ -154,6 +161,7 @@ export class ContextDatabase {
           c.id,
           c.projectId,
           c.path,
+          c.scope,
           c.kind,
           c.language,
           c.startLine,
@@ -163,12 +171,12 @@ export class ContextDatabase {
           bm25(chunks_fts) AS rank
         FROM chunks_fts
         JOIN chunks c ON c.id = chunks_fts.rowid
-        WHERE chunks_fts MATCH ?
+        WHERE chunks_fts MATCH ? AND c.scope = ?
         ORDER BY rank ASC
         LIMIT ?
       `
       )
-      .all(ftsQuery, limit) as ISearchResult[];
+      .all(ftsQuery, scope, limit) as ISearchResult[];
   }
 
   stats(): IStats {

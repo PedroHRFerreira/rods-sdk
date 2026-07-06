@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { doctorAdapters, enableAdapter, listAdapters, syncAdapters } from '../src/services/adapters.js';
+import { doctorAdapters, enableAdapter, listAdapters, listAdapterTargets, syncAdapters } from '../src/services/adapters.js';
 import { initProject } from '../src/services/scaffold.js';
 
 test('adapter catalog excludes context-mode and keeps rtk as the default adapter', () => {
@@ -12,6 +12,10 @@ test('adapter catalog excludes context-mode and keeps rtk as the default adapter
   assert.deepEqual(
     adapters.map((adapter) => adapter.name),
     ['rtk', 'claude-mem', 'caveman']
+  );
+  assert.deepEqual(
+    listAdapterTargets().map((target) => target.id),
+    ['codex', 'claude']
   );
 });
 
@@ -32,38 +36,54 @@ test('enableAdapter updates .ai/config.json and writes the adapter note', async 
 
 test('syncAdapters copies .ai skills to the Codex .agents skills directory', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-sync-'));
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-codex-home-'));
   await initProject(root);
 
-  const result = await syncAdapters(root, 'codex');
+  const result = await syncAdapters(root, 'codex', { codexHome });
   const syncedSkill = await fs.readFile(
     path.join(root, '.agents', 'skills', 'context-search-first', 'SKILL.md'),
     'utf8'
   );
+  const hook = await fs.readFile(path.join(codexHome, 'RTK.md'), 'utf8');
 
   assert.equal(result.target, 'codex');
-  assert.equal(result.files.length, 1);
+  assert.equal(result.files.length, 5);
   assert.match(syncedSkill, /Context Search First/);
+  assert.match(hook, /Rods SDK Codex Hook/);
 });
 
 test('syncAdapters can copy Codex skills to a custom writable directory', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-sync-custom-'));
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-codex-home-'));
   await initProject(root);
   await fs.mkdir(path.join(root, '.agents'));
   await fs.chmod(path.join(root, '.agents'), 0o555);
 
   try {
-    const result = await syncAdapters(root, 'codex', { codexSkillsDir: '.codex/skills' });
+    const result = await syncAdapters(root, 'codex', { codexSkillsDir: '.codex/skills', codexHome });
     const syncedSkill = await fs.readFile(
       path.join(root, '.codex', 'skills', 'context-search-first', 'SKILL.md'),
       'utf8'
     );
 
     assert.equal(result.target, 'codex');
-    assert.equal(result.files.length, 1);
+    assert.equal(result.files.length, 5);
     assert.match(syncedSkill, /Context Search First/);
   } finally {
     await fs.chmod(path.join(root, '.agents'), 0o755);
   }
+});
+
+test('syncAdapters writes Claude projection from the target registry', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-claude-'));
+  await initProject(root);
+
+  const result = await syncAdapters(root, 'claude');
+  const hook = await fs.readFile(path.join(root, 'CLAUDE.md'), 'utf8');
+
+  assert.equal(result.target, 'claude');
+  assert.equal(result.files.length, 1);
+  assert.match(hook, /Rods SDK Claude Hook/);
 });
 
 test('doctorAdapters reports binary checks and Codex configuration signals', async () => {
@@ -89,6 +109,7 @@ test('doctorAdapters reports binary checks and Codex configuration signals', asy
   await fs.chmod(rtkPath, 0o755);
 
   const reports = await doctorAdapters(root, {
+    target: 'codex',
     codexHome,
     env: {
       ...process.env,

@@ -10,3 +10,4 @@
 6. Do not duplicate business logic or project rules across generated files.
 7. Keep MCP tools primitive; put workflows and behavior in skills.
 8. Optimize for small, auditable context instead of large prompt dumps.
+9. If a card or link depends on external systems, pause before retrieval and ask whether to proceed, only plan, or take another action.

@@ -11,6 +11,7 @@ import { chunkContent } from './chunk.js';
 
 export interface IIngestOptions {
   type?: TContextKind;
+  scope?: string;
 }
 
 export class IndexerService {
@@ -34,7 +35,7 @@ export class IndexerService {
       }
 
       try {
-        const result = await this.ingestFile(filePath, options.type);
+        const result = await this.ingestFile(filePath, options);
 
         if (result.skipped) {
           summary.skipped += 1;
@@ -63,7 +64,7 @@ export class IndexerService {
     });
   }
 
-  private async ingestFile(filePath: string, explicitKind?: TContextKind): Promise<{ skipped: boolean; chunks: number }> {
+  private async ingestFile(filePath: string, options: IIngestOptions): Promise<{ skipped: boolean; chunks: number }> {
     const buffer = await fs.readFile(filePath);
 
     if (isProbablyBinary(buffer)) {
@@ -71,8 +72,9 @@ export class IndexerService {
     }
 
     const fileHash = sha256(buffer);
-    const kind = detectKind(filePath, explicitKind);
-    const cacheKey = `file:${filePath}:${kind}`;
+    const kind = detectKind(filePath, options.type);
+    const scope = normalizeScope(options.scope);
+    const cacheKey = `file:${scope}:${filePath}:${kind}`;
 
     if (this.db.getCache(cacheKey) === fileHash) {
       return { skipped: true, chunks: 0 };
@@ -84,6 +86,7 @@ export class IndexerService {
     const chunks: IChunkInput[] = chunkContent(content, this.config.chunkSize).map((chunk) => ({
       projectId: project?.id ?? null,
       path: filePath,
+      scope,
       kind,
       language,
       startLine: chunk.startLine,
@@ -97,6 +100,20 @@ export class IndexerService {
 
     return { skipped: false, chunks: insertedChunks };
   }
+}
+
+export function normalizeScope(scope: string | undefined): string {
+  const normalized = (scope ?? 'general').trim();
+
+  if (!normalized) {
+    return 'general';
+  }
+
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(normalized)) {
+    throw new Error(`Invalid scope: ${scope}`);
+  }
+
+  return normalized;
 }
 
 function createSummary(): IIngestSummary {

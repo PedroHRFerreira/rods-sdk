@@ -2,12 +2,14 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { copyFileIfAllowed, pathExists, writeTemplateFile, type IFileWriteResult } from './scaffold.js';
 
 export const ADAPTER_NAMES = ['rtk', 'claude-mem', 'caveman'] as const;
+export const ADAPTER_TARGET_IDS = ['codex', 'claude'] as const;
 
 export type AdapterName = (typeof ADAPTER_NAMES)[number];
-export type AdapterTarget = 'codex';
+export type AdapterTarget = (typeof ADAPTER_TARGET_IDS)[number];
 
 export interface IAdapterState {
   enabled: boolean;
@@ -23,7 +25,9 @@ export interface IGovernanceConfig {
     apiEnabled: false;
   };
   defaultTarget: AdapterTarget;
+  targets: Record<AdapterTarget, { enabled: boolean }>;
   adapters: Record<AdapterName, IAdapterState>;
+  generatedTemplates?: Record<string, string>;
 }
 
 export interface IAdapterDefinition {
@@ -53,6 +57,7 @@ export interface IAdapterSyncResult {
 export interface IAdapterSyncOptions {
   force?: boolean;
   codexSkillsDir?: string;
+  codexHome?: string;
 }
 
 export interface ICommandCheck {
@@ -118,8 +123,49 @@ const ADAPTERS: Record<AdapterName, IAdapterDefinition> = {
   }
 };
 
+export interface ITargetIntegrationState {
+  configText: string;
+  hooksText: string;
+  projectText: string;
+  externalText: string;
+  allText: string;
+}
+
+export interface IAdapterTargetDefinition {
+  id: AdapterTarget;
+  hookTemplate: string;
+  hookPath(root: string, options: IAdapterSyncOptions | IAdapterDoctorOptions): string;
+  sync(root: string, options: IAdapterSyncOptions): Promise<IFileWriteResult[]>;
+  readState(root: string, options: IAdapterDoctorOptions): Promise<ITargetIntegrationState>;
+}
+
+const TARGET_REGISTRY: Record<AdapterTarget, IAdapterTargetDefinition> = {
+  codex: {
+    id: 'codex',
+    hookTemplate: 'codex.md',
+    hookPath: (_root, options) => path.join(options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'RTK.md'),
+    sync: syncCodexTarget,
+    readState: readCodexIntegrationState
+  },
+  claude: {
+    id: 'claude',
+    hookTemplate: 'claude.md',
+    hookPath: (root) => path.join(root, 'CLAUDE.md'),
+    sync: syncClaudeTarget,
+    readState: readClaudeIntegrationState
+  }
+};
+
 export function listAdapters(): IAdapterDefinition[] {
   return ADAPTER_NAMES.map((name) => ADAPTERS[name]);
+}
+
+export function listAdapterTargets(): IAdapterTargetDefinition[] {
+  return ADAPTER_TARGET_IDS.map((id) => TARGET_REGISTRY[id]);
+}
+
+export function isAdapterTarget(input: string): input is AdapterTarget {
+  return (ADAPTER_TARGET_IDS as readonly string[]).includes(input);
 }
 
 export function isAdapterName(input: string): input is AdapterName {
@@ -158,19 +204,28 @@ export async function syncAdapters(
   target: AdapterTarget,
   options: IAdapterSyncOptions = {}
 ): Promise<IAdapterSyncResult> {
-  if (target !== 'codex') {
+  const resolvedRoot = path.resolve(root);
+  const definition = TARGET_REGISTRY[target];
+
+  if (!definition) {
     throw new Error(`Unsupported adapter target: ${target}`);
   }
 
-  const resolvedRoot = path.resolve(root);
-  const sourceSkillsDir = path.join(resolvedRoot, '.ai', 'skills');
+  const files = await definition.sync(resolvedRoot, options);
+
+  return { target, files };
+}
+
+async function syncCodexTarget(root: string, options: IAdapterSyncOptions): Promise<IFileWriteResult[]> {
+  const sourceSkillsDir = path.join(root, '.ai', 'skills');
   const destinationSkillsDir = options.codexSkillsDir
-    ? path.resolve(resolvedRoot, options.codexSkillsDir)
-    : path.join(resolvedRoot, '.agents', 'skills');
+    ? path.resolve(root, options.codexSkillsDir)
+    : path.join(root, '.agents', 'skills');
   const files: IFileWriteResult[] = [];
 
   if (!(await pathExists(sourceSkillsDir))) {
-    return { target, files };
+    files.push(await writeTargetHook(root, TARGET_REGISTRY.codex, options));
+    return files;
   }
 
   const entries = await fs.readdir(sourceSkillsDir, { withFileTypes: true });
@@ -193,7 +248,17 @@ export async function syncAdapters(
     );
   }
 
-  return { target, files };
+  files.push(await writeTargetHook(root, TARGET_REGISTRY.codex, options));
+
+  return files;
+}
+
+async function syncClaudeTarget(root: string, options: IAdapterSyncOptions): Promise<IFileWriteResult[]> {
+  const files: IFileWriteResult[] = [];
+
+  files.push(await writeTargetHook(root, TARGET_REGISTRY.claude, options));
+
+  return files;
 }
 
 export async function doctorAdapters(
@@ -201,14 +266,15 @@ export async function doctorAdapters(
   options: IAdapterDoctorOptions = {}
 ): Promise<IAdapterDoctorReport[]> {
   const target = options.target ?? 'codex';
+  const definition = TARGET_REGISTRY[target];
 
-  if (target !== 'codex') {
+  if (!definition) {
     throw new Error(`Unsupported adapter target: ${target}`);
   }
 
   const resolvedRoot = path.resolve(root);
   const config = await loadGovernanceConfig(resolvedRoot);
-  const integrationState = await readCodexIntegrationState(resolvedRoot, options.codexHome);
+  const integrationState = await definition.readState(resolvedRoot, options);
   const reports: IAdapterDoctorReport[] = [];
 
   for (const adapter of listAdapters()) {
@@ -253,6 +319,10 @@ export async function loadGovernanceConfig(root: string): Promise<IGovernanceCon
   return {
     ...defaults,
     ...parsed,
+    targets: {
+      ...defaults.targets,
+      ...(parsed.targets ?? {})
+    },
     adapters: {
       ...defaults.adapters,
       ...(parsed.adapters ?? {})
@@ -277,6 +347,10 @@ function createDefaultConfig(root: string): IGovernanceConfig {
       apiEnabled: false
     },
     defaultTarget: 'codex',
+    targets: {
+      codex: { enabled: true },
+      claude: { enabled: false }
+    },
     adapters: {
       rtk: { enabled: true },
       'claude-mem': { enabled: false },
@@ -356,16 +430,11 @@ function runCommand(
   });
 }
 
-interface ICodexIntegrationState {
-  configText: string;
-  hooksText: string;
-  projectText: string;
-  externalText: string;
-  allText: string;
-}
-
-async function readCodexIntegrationState(root: string, codexHomeInput?: string): Promise<ICodexIntegrationState> {
-  const codexHome = codexHomeInput ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+async function readCodexIntegrationState(
+  root: string,
+  options: IAdapterDoctorOptions = {}
+): Promise<ITargetIntegrationState> {
+  const codexHome = options.codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   const projectFiles = [
     path.join(root, 'AGENTS.md'),
     path.join(root, '.ai', 'adapters', 'rtk.md'),
@@ -379,7 +448,7 @@ async function readCodexIntegrationState(root: string, codexHomeInput?: string):
     path.join(root, '.agents', 'skills', 'caveman', 'SKILL.md')
   ];
   const configText = await readText(path.join(codexHome, 'config.toml'));
-  const hooksText = await readText(path.join(codexHome, 'hooks.json'));
+  const hooksText = [await readText(path.join(codexHome, 'hooks.json')), await readText(path.join(codexHome, 'RTK.md'))].join('\n');
   const projectText = (await Promise.all(projectFiles.map((filePath) => readText(filePath)))).join('\n');
   const externalProjectText = (await Promise.all(externalFiles.map((filePath) => readText(filePath)))).join('\n');
   const externalText = [configText, hooksText, externalProjectText].join('\n');
@@ -391,6 +460,63 @@ async function readCodexIntegrationState(root: string, codexHomeInput?: string):
     externalText,
     allText: [externalText, projectText].join('\n')
   };
+}
+
+async function readClaudeIntegrationState(root: string): Promise<ITargetIntegrationState> {
+  const projectFiles = [
+    path.join(root, 'AGENTS.md'),
+    path.join(root, 'CLAUDE.md'),
+    path.join(root, '.ai', 'adapters', 'rtk.md'),
+    path.join(root, '.ai', 'adapters', 'claude-mem.md'),
+    path.join(root, '.ai', 'adapters', 'caveman.md')
+  ];
+  const projectText = (await Promise.all(projectFiles.map((filePath) => readText(filePath)))).join('\n');
+
+  return {
+    configText: '',
+    hooksText: projectText,
+    projectText,
+    externalText: projectText,
+    allText: projectText
+  };
+}
+
+async function writeTargetHook(
+  root: string,
+  target: IAdapterTargetDefinition,
+  options: IAdapterSyncOptions
+): Promise<IFileWriteResult> {
+  const hookPath = target.hookPath(root, options);
+  const content = await renderHookTemplate(target.hookTemplate);
+  const exists = await pathExists(hookPath);
+
+  if (exists && !options.force) {
+    const current = await fs.readFile(hookPath, 'utf8');
+
+    if (current.includes('Rods SDK')) {
+      return { path: hookPath, status: 'skipped' };
+    }
+
+    await fs.mkdir(path.dirname(hookPath), { recursive: true });
+    await fs.writeFile(hookPath, `${current.trimEnd()}\n\n${content}`);
+    return { path: hookPath, status: 'overwritten' };
+  }
+
+  await fs.mkdir(path.dirname(hookPath), { recursive: true });
+  await fs.writeFile(hookPath, content);
+
+  return { path: hookPath, status: exists ? 'overwritten' : 'created' };
+}
+
+async function renderHookTemplate(templateName: string): Promise<string> {
+  const baseHook = await fs.readFile(getHookTemplatePath('base.md'), 'utf8');
+  const template = await fs.readFile(getHookTemplatePath(templateName), 'utf8');
+
+  return template.replace('{{baseHook}}', baseHook.trim());
+}
+
+function getHookTemplatePath(templateName: string): string {
+  return path.join(fileURLToPath(new URL('../../templates/hooks', import.meta.url)), templateName);
 }
 
 async function readText(filePath: string): Promise<string> {
@@ -410,7 +536,7 @@ function detectTerms(text: string, terms: string[]): boolean {
   return terms.some((term) => normalized.includes(term.toLowerCase()));
 }
 
-function detectConflict(_adapter: IAdapterDefinition, _state: ICodexIntegrationState): string {
+function detectConflict(_adapter: IAdapterDefinition, _state: ITargetIntegrationState): string {
   return 'none';
 }
 

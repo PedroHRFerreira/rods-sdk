@@ -4,7 +4,7 @@ import process from 'node:process';
 import { z } from 'zod';
 import { ContextDatabase } from '../database/database.js';
 import { loadConfig } from '../services/config.js';
-import { IndexerService } from '../services/indexer.js';
+import { IndexerService, normalizeScope } from '../services/indexer.js';
 import { detectKind } from '../utils/kind.js';
 
 const INSTRUCTIONS = [
@@ -30,17 +30,19 @@ server.tool(
   'Search indexed chunks with SQLite FTS5/BM25. Use this before opening large files.',
   {
     query: z.string().min(1),
+    scope: z.string().min(1).optional(),
     limit: z.number().int().positive().max(50).optional()
   },
-  async ({ query, limit }) => {
+  async ({ query, scope, limit }) => {
     const { db, close, config } = openContext();
 
     try {
-      const results = db.search(query, limit ?? config.searchLimit);
+      const results = db.searchScoped(query, limit ?? config.searchLimit, normalizeScope(scope));
       return toJsonResult({
         results: results.map((result) => ({
           id: result.id,
           path: result.path,
+          scope: result.scope,
           kind: result.kind,
           language: result.language,
           lines: `${result.startLine}-${result.endLine}`,
@@ -90,17 +92,19 @@ server.tool(
   'Index a file or directory into Context Engine chunks.',
   {
     path: z.string().min(1),
+    scope: z.string().min(1).optional(),
     type: z
       .enum(['file', 'log', 'diff', 'markdown', 'error', 'stacktrace', 'json', 'sql', 'http'])
       .optional()
   },
-  async ({ path, type }) => {
+  async ({ path, scope, type }) => {
     const { db, close, config } = openContext();
 
     try {
       const indexer = new IndexerService(db, config);
       const summary = await indexer.ingestPath(path, {
-        type: type ? detectKind(path, type) : undefined
+        type: type ? detectKind(path, type) : undefined,
+        scope: normalizeScope(scope)
       });
 
       return toJsonResult(summary);

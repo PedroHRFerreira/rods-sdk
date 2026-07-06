@@ -17,6 +17,8 @@ npm install
 npm run build
 ```
 
+Instalações via git executam `prepare` para gerar `dist/` automaticamente. Em projetos com pnpm, se lifecycle scripts de dependências estiverem bloqueados, rode `pnpm approve-builds` ou adicione `rods-sdk` em `pnpm.onlyBuiltDependencies`.
+
 Durante o desenvolvimento:
 
 ```bash
@@ -31,6 +33,63 @@ context --help
 ```
 
 `context` continua existindo como alias de compatibilidade para a mesma CLI.
+
+## Principais Atualizações
+
+Esta versão adiciona automação de governança, atualização seletiva de templates e isolamento de contexto de revisão.
+
+| Área | O que mudou | Impacto no framework |
+|---|---|---|
+| Instalação via git | `prepare` roda `npm run build` automaticamente. | Consumidores que instalam via GitHub recebem `dist/` sem passo manual, exceto quando pnpm bloqueia lifecycle scripts. |
+| Inicialização | `rods init` agora gera governança, sincroniza Codex, escreve/mescla `~/.codex/RTK.md` e roda doctor. | O setup inicial fica concentrado em um comando e deixa de depender de `rtk init -g --codex` manual. |
+| Targets de agente | Codex e Claude são definidos em um registry de targets. | Novos harnesses podem ser adicionados com menos condicionais e menos duplicação. |
+| Upgrade | `rods upgrade` atualiza templates seletivamente, preserva arquivos customizados e tem `--dry-run`. | Projetos consumidores conseguem receber melhorias do SDK sem perder ajustes locais. |
+| Skills | Foram adicionadas skills de `review`, `architecture` e `quality`. | Agentes passam a ter regras versionadas para revisão, arquitetura e validação. |
+| Context Engine | `ingest` e `search` aceitam `--scope`, com `general` como padrão e `review` para revisão. | Contextos de revisão ficam isolados do índice geral sem criar outro projeto. |
+| Migração SQLite | Bancos antigos recebem backfill de `scope=general`. | Bases já indexadas continuam funcionando após o upgrade. |
+
+## Atualizar Projetos Consumidores
+
+Use primeiro o dry-run para ver o que será alterado:
+
+```bash
+rods upgrade /caminho/absoluto/do/projeto --dry-run
+```
+
+Aplicar atualização seletiva preservando arquivos customizados:
+
+```bash
+rods upgrade /caminho/absoluto/do/projeto
+```
+
+Forçar atualização dos arquivos gerados pelo SDK:
+
+```bash
+rods upgrade /caminho/absoluto/do/projeto --force
+```
+
+Se o projeto usa pnpm e o `dist/` não foi gerado durante a instalação via git:
+
+```bash
+pnpm approve-builds
+```
+
+Ou configure no `package.json` raiz do consumidor:
+
+```json
+{
+  "pnpm": {
+    "onlyBuiltDependencies": ["rods-sdk"]
+  }
+}
+```
+
+Depois do upgrade, rode uma validação rápida:
+
+```bash
+rods adapter doctor /caminho/absoluto/do/projeto
+context search "termo de validação" --limit 8
+```
 
 ## Como Rodar O Framework
 
@@ -54,11 +113,19 @@ context read <chunkId>
 context stats
 ```
 
+Para contexto dedicado de revisão:
+
+```bash
+context ingest /caminho/absoluto/do/projeto --scope review
+context search "critério de revisão" --scope review --limit 8
+```
+
 4. Para gerar governança em um projeto consumidor:
 
 ```bash
 rods init /caminho/absoluto/do/projeto
 rods adapter sync /caminho/absoluto/do/projeto --target codex
+rods adapter sync /caminho/absoluto/do/projeto --target claude
 ```
 
 Se `.agents/skills` estiver somente leitura no ambiente, sincronize para um diretório gravável:
@@ -70,18 +137,19 @@ rods adapter sync /caminho/absoluto/do/projeto --target codex --codex-skills-dir
 ## Comandos
 
 ```bash
-context ingest <path> [--type file|log|markdown|diff|error|stacktrace|json|sql|http]
-context search <query> [--limit 8]
+context ingest <path> [--scope general|review] [--type file|log|markdown|diff|error|stacktrace|json|sql|http]
+context search <query> [--scope general|review] [--limit 8]
 context read <chunkId>
 context stats
 context project add <name> <root>
 context project list
 context project remove <name>
 rods init [path] [--force]
+rods upgrade [path] [--force] [--dry-run]
 rods adapter list
 rods adapter enable <rtk|claude-mem|caveman> [path] [--force]
-rods adapter sync [path] --target codex [--codex-skills-dir <path>] [--force]
-rods adapter doctor [path] [--target codex]
+rods adapter sync [path] --target codex|claude [--codex-skills-dir <path>] [--force]
+rods adapter doctor [path] [--target codex|claude]
 ```
 
 ## Integração Com Codex
@@ -117,19 +185,24 @@ Defina `CONTEXT_ENGINE_HOME` para isolar o armazenamento em testes ou experiment
 
 ## Governança
 
-`rods init` cria arquivos de governança no projeto sem instalar ferramentas externas:
+`rods init` cria arquivos de governança no projeto, sincroniza a projeção Codex e escreve/mescla o hook RTK em `~/.codex/RTK.md`:
 
 ```text
 AGENTS.md
 .ai/config.json
 .ai/constitution.md
 .ai/skills/context-search-first/SKILL.md
+.ai/skills/review/SKILL.md
+.ai/skills/architecture/SKILL.md
+.ai/skills/quality/SKILL.md
 .ai/adapters/rtk.md
 ```
 
-`.ai/` é a fonte versionada da verdade. `rods adapter sync --target codex` copia `.ai/skills/*/SKILL.md` para `.agents/skills/`, permitindo consumo local pelo Codex quando esse diretório for gravável.
+`.ai/` é a fonte versionada da verdade. `rods adapter sync --target codex` copia `.ai/skills/*/SKILL.md` para `.agents/skills/`, permitindo consumo local pelo Codex quando esse diretório for gravável. `rods adapter sync --target claude` gera a projeção `CLAUDE.md`.
 
-RTK vem habilitado por padrão em `.ai/config.json`. Rode `rtk init -g --codex` separadamente quando quiser que o RTK instale sua própria integração com o Codex.
+RTK vem habilitado por padrão em `.ai/config.json`. O hook Codex gerado pelo rods-sdk documenta o fluxo RTK/Context Engine sem exigir um passo manual de `rtk init -g --codex`.
+
+`rods upgrade --dry-run` mostra quais arquivos seriam atualizados. O upgrade real preserva arquivos customizados e reporta quando existe versão upstream mais nova para eles.
 
 A execução é CLI-first por padrão:
 

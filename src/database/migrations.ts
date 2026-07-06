@@ -17,6 +17,7 @@ export function runMigrations(db: Database.Database): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       projectId INTEGER,
       path TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'general',
       kind TEXT NOT NULL,
       language TEXT NOT NULL,
       startLine INTEGER NOT NULL,
@@ -45,27 +46,75 @@ export function runMigrations(db: Database.Database): void {
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
       content,
       path,
+      scope UNINDEXED,
       kind UNINDEXED,
       language UNINDEXED,
       content='chunks',
       content_rowid='id'
     );
 
-    CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-      INSERT INTO chunks_fts(rowid, content, path, kind, language)
-      VALUES (new.id, new.content, new.path, new.kind, new.language);
+  `);
+
+  migrateScope(db);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_chunks_scope ON chunks(scope)');
+  createChunkTriggers(db);
+}
+
+function migrateScope(db: Database.Database): void {
+  const chunkColumns = db.prepare('PRAGMA table_info(chunks)').all() as Array<{ name: string }>;
+  const hasChunkScope = chunkColumns.some((column) => column.name === 'scope');
+
+  if (!hasChunkScope) {
+    db.exec("ALTER TABLE chunks ADD COLUMN scope TEXT NOT NULL DEFAULT 'general'");
+  }
+
+  const ftsColumns = db.prepare('PRAGMA table_info(chunks_fts)').all() as Array<{ name: string }>;
+  const hasFtsScope = ftsColumns.some((column) => column.name === 'scope');
+
+  if (!hasFtsScope) {
+    db.exec(`
+      DROP TRIGGER IF EXISTS chunks_ai;
+      DROP TRIGGER IF EXISTS chunks_ad;
+      DROP TRIGGER IF EXISTS chunks_au;
+      DROP TABLE IF EXISTS chunks_fts;
+      CREATE VIRTUAL TABLE chunks_fts USING fts5(
+        content,
+        path,
+        scope UNINDEXED,
+        kind UNINDEXED,
+        language UNINDEXED,
+        content='chunks',
+        content_rowid='id'
+      );
+      INSERT INTO chunks_fts(rowid, content, path, scope, kind, language)
+      SELECT id, content, path, scope, kind, language FROM chunks;
+    `);
+  }
+
+  db.exec("UPDATE chunks SET scope = 'general' WHERE scope IS NULL OR scope = ''");
+}
+
+function createChunkTriggers(db: Database.Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS chunks_ai;
+    DROP TRIGGER IF EXISTS chunks_ad;
+    DROP TRIGGER IF EXISTS chunks_au;
+
+    CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+      INSERT INTO chunks_fts(rowid, content, path, scope, kind, language)
+      VALUES (new.id, new.content, new.path, new.scope, new.kind, new.language);
     END;
 
-    CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-      INSERT INTO chunks_fts(chunks_fts, rowid, content, path, kind, language)
-      VALUES ('delete', old.id, old.content, old.path, old.kind, old.language);
+    CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
+      INSERT INTO chunks_fts(chunks_fts, rowid, content, path, scope, kind, language)
+      VALUES ('delete', old.id, old.content, old.path, old.scope, old.kind, old.language);
     END;
 
-    CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-      INSERT INTO chunks_fts(chunks_fts, rowid, content, path, kind, language)
-      VALUES ('delete', old.id, old.content, old.path, old.kind, old.language);
-      INSERT INTO chunks_fts(rowid, content, path, kind, language)
-      VALUES (new.id, new.content, new.path, new.kind, new.language);
+    CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
+      INSERT INTO chunks_fts(chunks_fts, rowid, content, path, scope, kind, language)
+      VALUES ('delete', old.id, old.content, old.path, old.scope, old.kind, old.language);
+      INSERT INTO chunks_fts(rowid, content, path, scope, kind, language)
+      VALUES (new.id, new.content, new.path, new.scope, new.kind, new.language);
     END;
   `);
 }

@@ -29,6 +29,7 @@ export interface IChunk {
   id: number;
   projectId: number | null;
   path: string;
+  scope: string;
   kind: TContextKind;
   language: string;
   startLine: number;
@@ -41,6 +42,7 @@ export interface IChunk {
 export interface IChunkInput {
   projectId: number | null;
   path: string;
+  scope: string;
   kind: TContextKind;
   language: string;
   startLine: number;
@@ -60,6 +62,7 @@ export interface ISearchResult {
   id: number;
   projectId: number | null;
   path: string;
+  scope: string;
   kind: TContextKind;
   language: string;
   startLine: number;

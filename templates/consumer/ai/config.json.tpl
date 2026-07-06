@@ -7,6 +7,14 @@
     "apiEnabled": false
   },
   "defaultTarget": "codex",
+  "targets": {
+    "codex": {
+      "enabled": true
+    },
+    "claude": {
+      "enabled": false
+    }
+  },
   "adapters": {
     "rtk": {
       "enabled": true
@@ -18,5 +26,6 @@
       "enabled": false,
       "mode": "opt-in"
     }
-  }
+  },
+  "generatedTemplates": {}
 }
