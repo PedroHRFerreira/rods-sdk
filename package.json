@@ -9,9 +9,9 @@
     "templates"
   ],
   "bin": {
-    "rods": "./bin/rods",
-    "context": "./bin/context",
-    "context-mcp": "./bin/context-mcp"
+    "rods": "bin/rods",
+    "context": "bin/context",
+    "context-mcp": "bin/context-mcp"
   },
   "publishConfig": {
     "access": "public"
