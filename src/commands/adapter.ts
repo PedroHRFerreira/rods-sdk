@@ -92,6 +92,8 @@ export function registerAdapterCommand(program: Command): void {
               `version="${report.version ?? ''}"`,
               `config=${report.configDetected}`,
               `hooks=${report.hooksDetected}`,
+              `lifecycleHooks=${report.lifecycleHooksDetected ?? false}`,
+              `capabilities=${report.capabilitiesDetected ?? false}`,
               `mcp=${report.mcpDetected}`,
               `conflict="${report.conflict}"`
             ].join(' ')

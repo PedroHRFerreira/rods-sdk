@@ -40,6 +40,7 @@ const INIT_TEMPLATES: ITemplateMapping[] = [
   { template: 'AGENTS.md.tpl', destination: 'AGENTS.md' },
   { template: 'ai/config.json.tpl', destination: '.ai/config.json' },
   { template: 'ai/constitution.md.tpl', destination: '.ai/constitution.md' },
+  { template: 'ai/policies/complexity.md.tpl', destination: '.ai/policies/complexity.md' },
   {
     template: 'ai/skills/context-search-first/SKILL.md.tpl',
     destination: '.ai/skills/context-search-first/SKILL.md'
@@ -57,9 +58,16 @@ const INIT_TEMPLATES: ITemplateMapping[] = [
     destination: '.ai/skills/quality/SKILL.md'
   },
   {
+    template: 'ai/skills/design-brainstorm/SKILL.md.tpl',
+    destination: '.ai/skills/design-brainstorm/SKILL.md'
+  },
+  { template: 'ai/adapters/codex/capabilities.md.tpl', destination: '.ai/adapters/codex/capabilities.md' },
+  { template: 'ai/adapters/claude/capabilities.md.tpl', destination: '.ai/adapters/claude/capabilities.md' },
+  {
     template: 'ai/adapters/rtk.md.tpl',
     destination: '.ai/adapters/rtk.md'
-  }
+  },
+  { template: 'rods/.gitignore.tpl', destination: '.rods/.gitignore' }
 ];
 
 const GENERATED_SCRIPTS: Record<string, string> = {

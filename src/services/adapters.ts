@@ -25,8 +25,14 @@ export interface IGovernanceConfig {
     apiEnabled: false;
   };
   defaultTarget: AdapterTarget;
-  targets: Record<AdapterTarget, { enabled: boolean; skillsDir?: string }>;
+  targets: Record<AdapterTarget, { enabled: boolean; skillsDir?: string; hooks?: boolean }>;
   adapters: Record<AdapterName, IAdapterState>;
+  escalation?: {
+    enabled: boolean;
+    policyPath: string;
+    specsDir: string;
+    modelAdviceOnly: boolean;
+  };
   generatedTemplates?: Record<string, string>;
   generatedScripts?: Record<string, string>;
 }
@@ -81,6 +87,8 @@ export interface IAdapterDoctorReport {
   hooksDetected: boolean;
   mcpDetected: boolean;
   conflict: string;
+  lifecycleHooksDetected?: boolean;
+  capabilitiesDetected?: boolean;
   checks: ICommandCheck[];
 }
 
@@ -228,6 +236,7 @@ async function syncCodexTarget(root: string, options: IAdapterSyncOptions): Prom
     : path.join(root, '.agents', 'skills');
 
   if (!(await pathExists(sourceSkillsDir))) {
+    await writeLifecycleHooks(root, 'codex');
     return {
       target: 'codex',
       status: 'synced',
@@ -313,6 +322,7 @@ async function trySyncCodexTarget(
     }
 
     files.push(await writeTargetHook(root, TARGET_REGISTRY.codex, options));
+    await writeLifecycleHooks(root, 'codex');
   } catch (error) {
     return { ok: false, reason: formatSyncError(error) };
   }
@@ -324,6 +334,7 @@ async function syncClaudeTarget(root: string, options: IAdapterSyncOptions): Pro
   const files: IFileWriteResult[] = [];
 
   files.push(await writeTargetHook(root, TARGET_REGISTRY.claude, options));
+  await writeLifecycleHooks(root, 'claude');
 
   return { target: 'claude', status: 'synced', files };
 }
@@ -365,6 +376,8 @@ export async function doctorAdapters(
       hooksDetected,
       mcpDetected,
       conflict: detectConflict(adapter, integrationState),
+      lifecycleHooksDetected: detectTerms(integrationState.hooksText, ['rods hook run']),
+      capabilitiesDetected: detectTerms(integrationState.projectText, [`harness: ${target}`]),
       checks
     });
   }
@@ -386,9 +399,17 @@ export async function loadGovernanceConfig(root: string): Promise<IGovernanceCon
   return {
     ...defaults,
     ...parsed,
+    version: Math.max(parsed.version ?? 1, 2),
+    escalation: {
+      enabled: parsed.escalation?.enabled ?? defaults.escalation?.enabled ?? true,
+      policyPath: parsed.escalation?.policyPath ?? defaults.escalation?.policyPath ?? '.ai/policies/complexity.md',
+      specsDir: parsed.escalation?.specsDir ?? defaults.escalation?.specsDir ?? 'docs/rods/specs',
+      modelAdviceOnly: parsed.escalation?.modelAdviceOnly ?? defaults.escalation?.modelAdviceOnly ?? true
+    },
     targets: {
       ...defaults.targets,
-      ...(parsed.targets ?? {})
+      codex: { ...defaults.targets.codex, ...(parsed.targets?.codex ?? {}) },
+      claude: { ...defaults.targets.claude, ...(parsed.targets?.claude ?? {}) }
     },
     adapters: {
       ...defaults.adapters,
@@ -406,7 +427,7 @@ async function saveGovernanceConfig(root: string, config: IGovernanceConfig): Pr
 
 function createDefaultConfig(root: string): IGovernanceConfig {
   return {
-    version: 1,
+    version: 2,
     project: path.basename(root),
     source: '.ai',
     execution: {
@@ -415,13 +436,19 @@ function createDefaultConfig(root: string): IGovernanceConfig {
     },
     defaultTarget: 'codex',
     targets: {
-      codex: { enabled: true },
-      claude: { enabled: false }
+      codex: { enabled: true, hooks: true },
+      claude: { enabled: false, hooks: true }
     },
     adapters: {
       rtk: { enabled: true },
       'claude-mem': { enabled: false },
       caveman: { enabled: false, mode: 'opt-in' }
+    },
+    escalation: {
+      enabled: true,
+      policyPath: '.ai/policies/complexity.md',
+      specsDir: 'docs/rods/specs',
+      modelAdviceOnly: true
     }
   };
 }
@@ -506,7 +533,8 @@ async function readCodexIntegrationState(
     path.join(root, 'AGENTS.md'),
     path.join(root, '.ai', 'adapters', 'rtk.md'),
     path.join(root, '.ai', 'adapters', 'claude-mem.md'),
-    path.join(root, '.ai', 'adapters', 'caveman.md')
+    path.join(root, '.ai', 'adapters', 'caveman.md'),
+    path.join(root, '.ai', 'adapters', 'codex', 'capabilities.md')
   ];
   const externalFiles = [
     path.join(root, 'RTK.md'),
@@ -516,13 +544,14 @@ async function readCodexIntegrationState(
   ];
   const configText = await readText(path.join(codexHome, 'config.toml'));
   const hooksText = [await readText(path.join(codexHome, 'hooks.json')), await readText(path.join(codexHome, 'RTK.md'))].join('\n');
+  const projectHooksText = await readText(path.join(root, '.codex', 'hooks.json'));
   const projectText = (await Promise.all(projectFiles.map((filePath) => readText(filePath)))).join('\n');
   const externalProjectText = (await Promise.all(externalFiles.map((filePath) => readText(filePath)))).join('\n');
   const externalText = [configText, hooksText, externalProjectText].join('\n');
 
   return {
     configText,
-    hooksText,
+    hooksText: [hooksText, projectHooksText].join('\n'),
     projectText,
     externalText,
     allText: [externalText, projectText].join('\n')
@@ -535,17 +564,58 @@ async function readClaudeIntegrationState(root: string): Promise<ITargetIntegrat
     path.join(root, 'CLAUDE.md'),
     path.join(root, '.ai', 'adapters', 'rtk.md'),
     path.join(root, '.ai', 'adapters', 'claude-mem.md'),
-    path.join(root, '.ai', 'adapters', 'caveman.md')
+    path.join(root, '.ai', 'adapters', 'caveman.md'),
+    path.join(root, '.ai', 'adapters', 'claude', 'capabilities.md')
   ];
   const projectText = (await Promise.all(projectFiles.map((filePath) => readText(filePath)))).join('\n');
+  const hooksText = await readText(path.join(root, '.claude', 'settings.json'));
 
   return {
     configText: '',
-    hooksText: projectText,
+    hooksText: [projectText, hooksText].join('\n'),
     projectText,
     externalText: projectText,
     allText: projectText
   };
+}
+
+async function writeLifecycleHooks(root: string, target: AdapterTarget): Promise<void> {
+  const hookPath = target === 'codex'
+    ? path.join(root, '.codex', 'hooks.json')
+    : path.join(root, '.claude', 'settings.json');
+  const current = await readJsonObject(hookPath);
+  const hooks = isRecord(current.hooks) ? { ...current.hooks } : {};
+  const command = `rods hook run --target ${target}`;
+  const events = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PreCompact', 'PostCompact'];
+  for (const event of events) {
+    const groups = Array.isArray(hooks[event]) ? hooks[event].filter((group) => !containsHookCommand(group, command)) : [];
+    const group: Record<string, unknown> = {
+      hooks: [{ type: 'command', command, timeout: event === 'UserPromptSubmit' ? 30 : 60, statusMessage: 'Rods escalation' }]
+    };
+    if (event === 'PreToolUse' || event === 'PostToolUse') group.matcher = 'Bash|apply_patch|Edit|Write';
+    hooks[event] = [...groups, group];
+  }
+  await fs.mkdir(path.dirname(hookPath), { recursive: true });
+  await fs.writeFile(hookPath, `${JSON.stringify({ ...current, hooks }, null, 2)}\n`);
+}
+
+function containsHookCommand(group: unknown, command: string): boolean {
+  if (!isRecord(group) || !Array.isArray(group.hooks)) return false;
+  return group.hooks.some((hook) => isRecord(hook) && hook.command === command);
+}
+
+async function readJsonObject(filePath: string): Promise<Record<string, unknown>> {
+  try {
+    const value = JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown;
+    return isRecord(value) ? value : {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new Error(`Cannot merge lifecycle hooks at ${filePath}: invalid JSON`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 async function writeTargetHook(

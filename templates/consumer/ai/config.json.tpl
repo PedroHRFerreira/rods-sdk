@@ -1,18 +1,26 @@
 {
-  "version": 1,
+  "version": 2,
   "project": "{{projectName}}",
   "source": ".ai",
   "execution": {
     "mode": "cli",
     "apiEnabled": false
   },
+  "escalation": {
+    "enabled": true,
+    "policyPath": ".ai/policies/complexity.md",
+    "specsDir": "docs/rods/specs",
+    "modelAdviceOnly": true
+  },
   "defaultTarget": "codex",
   "targets": {
     "codex": {
-      "enabled": true
+      "enabled": true,
+      "hooks": true
     },
     "claude": {
-      "enabled": false
+      "enabled": false,
+      "hooks": true
     }
   },
   "adapters": {

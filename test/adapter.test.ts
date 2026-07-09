@@ -53,7 +53,7 @@ test('syncAdapters copies .ai skills to the Codex .agents skills directory', asy
   const hook = await fs.readFile(path.join(codexHome, 'RTK.md'), 'utf8');
 
   assert.equal(result.target, 'codex');
-  assert.equal(result.files.length, 5);
+  assert.equal(result.files.length, 6);
   assert.match(syncedSkill, /Context Search First/);
   assert.match(hook, /Rods SDK Codex Hook/);
 });
@@ -73,7 +73,7 @@ test('syncAdapters can copy Codex skills to a custom writable directory', async 
     );
 
     assert.equal(result.target, 'codex');
-    assert.equal(result.files.length, 5);
+    assert.equal(result.files.length, 6);
     assert.match(syncedSkill, /Context Search First/);
   } finally {
     await fs.chmod(path.join(root, '.agents'), 0o755);
@@ -137,6 +137,26 @@ test('syncAdapters writes Claude projection from the target registry', async () 
   assert.equal(result.target, 'claude');
   assert.equal(result.files.length, 1);
   assert.match(hook, /Rods SDK Claude Hook/);
+});
+
+test('syncAdapters merges lifecycle hooks idempotently and preserves user hooks', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-lifecycle-hooks-'));
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-lifecycle-codex-home-'));
+  await initProject(root);
+  await fs.mkdir(path.join(root, '.codex'), { recursive: true });
+  await fs.writeFile(path.join(root, '.codex', 'hooks.json'), JSON.stringify({
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo user-hook' }] }] }
+  }));
+
+  await syncAdapters(root, 'codex', { codexHome });
+  await syncAdapters(root, 'codex', { codexHome });
+  const hooks = JSON.parse(await fs.readFile(path.join(root, '.codex', 'hooks.json'), 'utf8')) as {
+    hooks: Record<string, Array<{ hooks: Array<{ command?: string }> }>>;
+  };
+  const sessionHooks = hooks.hooks.SessionStart.flatMap((group) => group.hooks.map((hook) => hook.command));
+  assert.ok(sessionHooks.includes('echo user-hook'));
+  assert.equal(sessionHooks.filter((command) => command === 'rods hook run --target codex').length, 1);
+  assert.ok(hooks.hooks.UserPromptSubmit);
 });
 
 test('doctorAdapters reports binary checks and Codex configuration signals', async () => {

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { registerAdapterCommand } from './commands/adapter.js';
 import { registerIngestCommand } from './commands/ingest.js';
+import { registerEscalationCommand } from './commands/escalation.js';
+import { registerHookCommand } from './commands/hook.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerProjectsCommand } from './commands/projects.js';
 import { registerReadCommand } from './commands/read.js';
@@ -24,6 +26,8 @@ program
   .showHelpAfterError();
 
 registerIngestCommand(program);
+registerEscalationCommand(program);
+registerHookCommand(program);
 registerSearchCommand(program);
 registerReadCommand(program);
 registerStatsCommand(program);

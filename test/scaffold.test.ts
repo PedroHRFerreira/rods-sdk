@@ -10,7 +10,7 @@ test('initProject scaffolds governance files and preserves existing files by def
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-init-'));
   const firstRun = await initProject(root);
 
-  assert.equal(firstRun.length, 8);
+  assert.equal(firstRun.length, 13);
   assert.ok(firstRun.every((result) => result.status === 'created'));
 
   const configPath = path.join(root, '.ai', 'config.json');
@@ -34,6 +34,10 @@ test('initProject scaffolds governance files and preserves existing files by def
     /name: context-search-first/
   );
   assert.match(await fs.readFile(path.join(root, '.ai', 'skills', 'review', 'SKILL.md'), 'utf8'), /name: review/);
+  assert.match(await fs.readFile(path.join(root, '.ai', 'policies', 'complexity.md'), 'utf8'), /maxFiles: 2/);
+  assert.match(await fs.readFile(path.join(root, '.ai', 'skills', 'design-brainstorm', 'SKILL.md'), 'utf8'), /design-brainstorm/);
+  assert.match(await fs.readFile(path.join(root, '.ai', 'adapters', 'codex', 'capabilities.md'), 'utf8'), /harness: codex/);
+  assert.equal(await fs.readFile(path.join(root, '.rods', '.gitignore'), 'utf8'), '*\n!.gitignore\n');
 
   await fs.writeFile(path.join(root, 'AGENTS.md'), 'custom');
   const secondRun = await initProject(root);
