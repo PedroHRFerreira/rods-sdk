@@ -1,6 +1,6 @@
 {
   "name": "@pedrohrferreira/rods-sdk",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Agent governance framework with Context Engine retrieval and RTK-first token economy.",
   "type": "module",
   "files": [
