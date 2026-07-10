@@ -40,68 +40,36 @@ test('enableAdapter updates .ai/config.json and writes the adapter note', async 
   assert.match(await fs.readFile(path.join(root, '.ai', 'adapters', 'claude-mem.md'), 'utf8'), /npx claude-mem install/);
 });
 
-test('syncAdapters copies .ai skills to the Codex .agents skills directory', async () => {
+test('syncAdapters keeps .ai skills as the default Codex skills source', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-sync-'));
   const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-codex-home-'));
   await initProject(root);
 
   const result = await syncAdapters(root, 'codex', { codexHome });
-  const syncedSkill = await fs.readFile(
-    path.join(root, '.agents', 'skills', 'context-search-first', 'SKILL.md'),
-    'utf8'
-  );
   const hook = await fs.readFile(path.join(codexHome, 'RTK.md'), 'utf8');
 
   assert.equal(result.target, 'codex');
-  assert.equal(result.files.length, 6);
-  assert.match(syncedSkill, /Context Search First/);
+  assert.equal(result.path, path.join('.ai', 'skills'));
+  assert.equal(result.files.length, 1);
+  await assert.rejects(fs.stat(path.join(root, '.agents')));
   assert.match(hook, /Rods SDK Codex Hook/);
 });
 
-test('syncAdapters can copy Codex skills to a custom writable directory', async () => {
+test('syncAdapters can project Codex skills to a custom directory', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-sync-custom-'));
   const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-codex-home-'));
   await initProject(root);
-  await fs.mkdir(path.join(root, '.agents'));
-  await fs.chmod(path.join(root, '.agents'), 0o555);
 
-  try {
-    const result = await syncAdapters(root, 'codex', { codexSkillsDir: '.codex/skills', codexHome });
-    const syncedSkill = await fs.readFile(
-      path.join(root, '.codex', 'skills', 'context-search-first', 'SKILL.md'),
-      'utf8'
-    );
+  const result = await syncAdapters(root, 'codex', { codexSkillsDir: '.codex/skills', codexHome });
+  const syncedSkill = await fs.readFile(
+    path.join(root, '.codex', 'skills', 'context-search-first', 'SKILL.md'),
+    'utf8'
+  );
 
-    assert.equal(result.target, 'codex');
-    assert.equal(result.files.length, 6);
-    assert.match(syncedSkill, /Context Search First/);
-  } finally {
-    await fs.chmod(path.join(root, '.agents'), 0o755);
-  }
-});
-
-test('syncAdapters falls back to .codex skills when .agents is read-only', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-sync-fallback-'));
-  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-codex-home-'));
-  await initProject(root);
-  await fs.mkdir(path.join(root, '.agents'));
-  await fs.chmod(path.join(root, '.agents'), 0o555);
-
-  try {
-    const result = await syncAdapters(root, 'codex', { codexHome });
-    const syncedSkill = await fs.readFile(
-      path.join(root, '.codex', 'skills', 'context-search-first', 'SKILL.md'),
-      'utf8'
-    );
-
-    assert.equal(result.status, 'synced');
-    assert.equal(result.fallback, true);
-    assert.equal(result.path, path.join('.codex', 'skills'));
-    assert.match(result.reason ?? '', /read-only|permission|EACCES|denied/i);
-    assert.match(syncedSkill, /Context Search First/);
-  } finally {
-    await fs.chmod(path.join(root, '.agents'), 0o755);
-  }
+  assert.equal(result.target, 'codex');
+  assert.equal(result.path, path.join('.codex', 'skills'));
+  assert.equal(result.files.length, 6);
+  assert.match(syncedSkill, /Context Search First/);
 });
 
 test('syncAdapters respects configured Codex skills directory', async () => {

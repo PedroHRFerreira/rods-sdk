@@ -231,20 +231,29 @@ async function syncCodexTarget(root: string, options: IAdapterSyncOptions): Prom
   const config = await loadGovernanceConfig(root);
   const sourceSkillsDir = path.join(root, '.ai', 'skills');
   const configuredSkillsDir = options.codexSkillsDir ?? config.targets.codex?.skillsDir;
-  const destinationSkillsDir = configuredSkillsDir
-    ? path.resolve(root, configuredSkillsDir)
-    : path.join(root, '.agents', 'skills');
 
   if (!(await pathExists(sourceSkillsDir))) {
     await writeLifecycleHooks(root, 'codex');
     return {
       target: 'codex',
       status: 'synced',
-      path: relativeFromRoot(root, destinationSkillsDir),
+      path: relativeFromRoot(root, sourceSkillsDir),
       files: [await writeTargetHook(root, TARGET_REGISTRY.codex, options)]
     };
   }
 
+  if (!configuredSkillsDir) {
+    await writeLifecycleHooks(root, 'codex');
+    return {
+      target: 'codex',
+      status: 'synced',
+      path: relativeFromRoot(root, sourceSkillsDir),
+      fallback: false,
+      files: [await writeTargetHook(root, TARGET_REGISTRY.codex, options)]
+    };
+  }
+
+  const destinationSkillsDir = path.resolve(root, configuredSkillsDir);
   const primaryResult = await trySyncCodexTarget(root, sourceSkillsDir, destinationSkillsDir, options);
 
   if (primaryResult.ok) {
@@ -257,37 +266,12 @@ async function syncCodexTarget(root: string, options: IAdapterSyncOptions): Prom
     };
   }
 
-  if (configuredSkillsDir) {
-    return {
-      target: 'codex',
-      status: 'skipped',
-      path: relativeFromRoot(root, destinationSkillsDir),
-      fallback: false,
-      reason: primaryResult.reason,
-      files: []
-    };
-  }
-
-  const fallbackSkillsDir = path.join(root, '.codex', 'skills');
-  const fallbackResult = await trySyncCodexTarget(root, sourceSkillsDir, fallbackSkillsDir, options);
-
-  if (fallbackResult.ok) {
-    return {
-      target: 'codex',
-      status: 'synced',
-      path: relativeFromRoot(root, fallbackSkillsDir),
-      fallback: true,
-      reason: primaryResult.reason,
-      files: fallbackResult.files
-    };
-  }
-
   return {
     target: 'codex',
     status: 'skipped',
     path: relativeFromRoot(root, destinationSkillsDir),
     fallback: false,
-    reason: fallbackResult.reason,
+    reason: primaryResult.reason,
     files: []
   };
 }

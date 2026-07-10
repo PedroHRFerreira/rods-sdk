@@ -142,7 +142,7 @@ rods adapter sync /caminho/absoluto/do/projeto --target codex
 rods adapter sync /caminho/absoluto/do/projeto --target claude
 ```
 
-Se `.agents/skills` estiver somente leitura no ambiente, sincronize para um diretório gravável:
+Por padrão, as skills ficam apenas em `.ai/skills`. Se você precisar projetar uma cópia para um diretório específico consumido pelo Codex, passe o destino explicitamente:
 
 ```bash
 rods adapter sync /caminho/absoluto/do/projeto --target codex --codex-skills-dir .codex/skills
@@ -165,6 +165,8 @@ rods adapter list
 rods adapter enable <rtk|claude-mem|caveman> [path] [--force]
 rods adapter sync [path] --target codex|claude [--codex-skills-dir <path>] [--force]
 rods adapter doctor [path] [--target codex|claude]
+rods escalation classify <task> [--files <files>] [--root <path>] [--json]
+rods hook run --target codex|claude
 ```
 
 ## Integração Com Codex
@@ -215,7 +217,7 @@ AGENTS.md
 .ai/adapters/rtk.md
 ```
 
-`.ai/` é a fonte versionada da verdade. `rods adapter sync --target codex` copia `.ai/skills/*/SKILL.md` para `.agents/skills/`, permitindo consumo local pelo Codex quando esse diretório for gravável. `rods adapter sync --target claude` gera a projeção `CLAUDE.md`.
+`.ai/` é a fonte versionada da verdade. `rods adapter sync --target codex` mantém as skills em `.ai/skills` e sincroniza apenas os hooks do target. Se houver necessidade de uma projeção física para outro diretório, use `--codex-skills-dir <path>`. `rods adapter sync --target claude` gera a projeção `CLAUDE.md`.
 
 RTK vem habilitado por padrão em `.ai/config.json`. O hook Codex gerado pelo rods-sdk documenta o fluxo RTK/Context Engine sem exigir um passo manual de `rtk init -g --codex`.
 
@@ -231,6 +233,20 @@ A execução é CLI-first por padrão:
   }
 }
 ```
+
+## Escalonamento De Modelo
+
+`rods escalation classify <task>` classifica a complexidade da tarefa e recomenda uma classe de modelo: `economy`, `balanced` ou `high-capability`. Essa recomendação é orientação textual de governança. O rods-sdk não troca o modelo ativo, não chama APIs de provedores de IA, não edita configuração do Codex/Claude e não faz roteamento automático entre modelos. O campo `changesConfiguration` existe para deixar esse contrato explícito e atualmente é sempre `false`.
+
+Quando executado via lifecycle hook, `rods hook run --target codex|claude` injeta a recomendação em `additionalContext` no evento `UserPromptSubmit`, junto com avisos de planejamento/revisão quando aplicáveis. O agente ou a pessoa operando a sessão ainda precisa ler essa sugestão e decidir manualmente se muda de modelo ou altera o plano de execução.
+
+Para estimar o escopo, passe os arquivos explicitamente sempre que quiser um resultado sensível ao recorte da tarefa:
+
+```bash
+rods escalation classify "corrigir typo no README" --files README.md
+```
+
+Se `--files` for omitido, o classificador usa `git diff --name-only` no repositório atual como fallback. Isso é útil para classificar a mudança em andamento, mas pode surpreender em repositórios com alterações não commitadas: dois textos de tarefa diferentes podem produzir o mesmo resultado quando o diff local é o mesmo.
 
 ## Adaptadores Opcionais
 

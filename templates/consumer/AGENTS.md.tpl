@@ -33,7 +33,7 @@ pnpm exec rods init
 pnpm exec rods adapter sync --target codex
 ```
 
-If `.agents/skills` is read-only, sync skills to a writable destination:
+By default, skills stay in `.ai/skills`. If Codex needs a physical projection in another directory, pass it explicitly:
 
 ```bash
 pnpm exec rods adapter sync --target codex --codex-skills-dir .codex/skills
@@ -59,5 +59,5 @@ pnpm exec rods read <chunkId>
 Project governance lives in `.ai/`.
 
 - `.ai/constitution.md` contains stable rules.
-- `.ai/skills/*/SKILL.md` contains skills that can be synced to supported agents.
+- `.ai/skills/*/SKILL.md` contains skills used as the project source of truth.
 - `.ai/adapters/` contains optional adapter notes for external tools.

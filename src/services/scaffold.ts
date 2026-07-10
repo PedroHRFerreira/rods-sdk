@@ -73,7 +73,7 @@ const INIT_TEMPLATES: ITemplateMapping[] = [
 const GENERATED_SCRIPTS: Record<string, string> = {
   'rods:upgrade': 'rods upgrade .',
   'rods:upgrade:dry-run': 'rods upgrade . --dry-run',
-  'rods:sync': 'rods adapter sync --target codex --codex-skills-dir .codex/skills',
+  'rods:sync': 'rods adapter sync --target codex',
   'context:ingest': 'context ingest .',
   'context:ingest:review': 'context ingest . --scope review',
   'context:stats': 'context stats'

@@ -7,7 +7,7 @@ export function registerEscalationCommand(program: Command): void {
   escalation
     .command('classify')
     .argument('<task>', 'task description')
-    .option('--files <files>', 'comma-separated paths touched by the task')
+    .option('--files <files>', 'comma-separated paths touched by the task; defaults to git diff --name-only when omitted')
     .option('--root <path>', 'project root', '.')
     .option('--json', 'emit JSON')
     .action(async (task: string, options: { files?: string; root: string; json?: boolean }) => {

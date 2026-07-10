@@ -52,7 +52,7 @@ export function registerAdapterCommand(program: Command): void {
     .command('sync')
     .argument('[path]', 'project root path', '.')
     .requiredOption('--target <target>', 'adapter target: codex or claude')
-    .option('--codex-skills-dir <path>', 'Codex skills directory when .agents/skills is not writable')
+    .option('--codex-skills-dir <path>', 'optional Codex skills projection directory')
     .option('--force', 'overwrite generated target files')
     .description('Sync .ai governance files to a supported agent target')
     .action(async (targetPath: string, options: { target: string; codexSkillsDir?: string; force?: boolean }) => {
