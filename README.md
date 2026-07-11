@@ -216,7 +216,10 @@ Defina `CONTEXT_ENGINE_HOME` para isolar o armazenamento em testes ou experiment
 - `search` retorna metadados compactos, ranqueados, com snippets.
 - `read` exige um `chunkId` explícito.
 - Hashes de arquivo são cacheados para pular reindexação do que não mudou.
+- O chunking usa heurísticas simples de estrutura e linhas vazias; ele não é um parser por linguagem.
 - O schema reserva campos de metadados de embedding para busca híbrida futura, sem implementar embeddings no MVP.
+
+Ao atualizar para a versão com chunking sensível à estrutura, a próxima execução de `rods ingest` reindexará o projeto inteiro uma única vez. As execuções seguintes voltarão a pular arquivos sem alterações normalmente.
 
 ## Governança
 

@@ -10,6 +10,8 @@ import { resolveProjectRoot } from '../utils/paths.js';
 import { detectLanguage } from '../utils/language.js';
 import { chunkContent } from './chunk.js';
 
+const CHUNK_ALGORITHM_VERSION = 2;
+
 export interface IIngestOptions {
   type?: TContextKind;
   scope?: string;
@@ -83,7 +85,7 @@ export class IndexerService {
     const fileHash = sha256(buffer);
     const kind = detectKind(filePath, options.type);
     const scope = normalizeScope(options.scope);
-    const cacheKey = `file:${filePath}:${kind}`;
+    const cacheKey = `file:${filePath}:${kind}:v${CHUNK_ALGORITHM_VERSION}`;
 
     if (this.db.getCache(cacheKey, scope) === fileHash) {
       return { skipped: true, chunks: 0 };
@@ -92,7 +94,7 @@ export class IndexerService {
     const content = buffer.toString('utf8');
     const project = this.db.findProjectForPath(filePath);
     const language = detectLanguage(filePath);
-    const chunks: IChunkInput[] = chunkContent(content, this.config.chunkSize).map((chunk) => ({
+    const chunks: IChunkInput[] = chunkContent(content, this.config.chunkSize, language).map((chunk) => ({
       projectId: project?.id ?? null,
       path: filePath,
       scope,

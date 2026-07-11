@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { ContextDatabase } from '../src/database/database.js';
 import { loadConfig } from '../src/services/config.js';
 import { IndexerService } from '../src/services/indexer.js';
+import { sha256 } from '../src/utils/hash.js';
 
 test('IndexerService ingests, searches and skips unchanged files', async () => {
   const storageHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-home-'));
@@ -75,6 +76,35 @@ test('IndexerService isolates search results by scope', async () => {
     const reviewResults = db.searchScoped('review-only-token', 8, 'review');
     assert.equal(reviewResults.length, 1);
     assert.equal(reviewResults[0]?.scope, 'review');
+  } finally {
+    db.close();
+    delete process.env.CONTEXT_ENGINE_HOME;
+  }
+});
+
+test('IndexerService reprocesses a legacy cache entry once after the chunk algorithm upgrade', async () => {
+  const storageHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-home-cache-version-'));
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'context-project-cache-version-'));
+  process.env.CONTEXT_ENGINE_HOME = storageHome;
+
+  const sourcePath = path.join(projectRoot, 'legacy.ts');
+  const sourceContent = 'const legacy = true;\n';
+  await fs.writeFile(sourcePath, sourceContent);
+
+  const config = loadConfig();
+  const db = new ContextDatabase(config);
+
+  try {
+    db.setCache(`file:${sourcePath}:file`, sha256(Buffer.from(sourceContent)), 'general');
+    const indexer = new IndexerService(db, config);
+
+    const firstSummary = await indexer.ingestPath(sourcePath);
+    assert.equal(firstSummary.indexed, 1);
+    assert.equal(firstSummary.skipped, 0);
+
+    const secondSummary = await indexer.ingestPath(sourcePath);
+    assert.equal(secondSummary.indexed, 0);
+    assert.equal(secondSummary.skipped, 1);
   } finally {
     db.close();
     delete process.env.CONTEXT_ENGINE_HOME;
