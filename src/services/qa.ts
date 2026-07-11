@@ -78,7 +78,7 @@ export function isQaFresh(entry: IQaEntry, root: string): boolean {
   return createQaFreshnessChecker(root)(entry);
 }
 
-function overlap(left: string, right: string): number {
+export function lexicalOverlap(left: string, right: string): number {
   const a = new Set(left.split(' ').filter(Boolean));
   const b = new Set(right.split(' ').filter(Boolean));
   if (!a.size || !b.size) return 0;
@@ -93,7 +93,7 @@ export function searchQa(db: ContextDatabase, projectId: number, question: strin
   const freshExact = exact.find(isFresh);
   if (freshExact) { db.touchQa(freshExact.id); return { status: 'hit', match: 'exact', confidence: 1, entry: { ...freshExact, hitCount: freshExact.hitCount + 1, lastUsedAt: new Date().toISOString() } }; }
   if (exact.length) return { status: 'stale', match: 'exact', confidence: 1, entry: exact[0] };
-  const ranked = db.findQaLexical(projectId, normalized).map((entry) => ({ entry, confidence: overlap(normalized, entry.normalizedQuestion) })).sort((a,b) => b.confidence - a.confidence);
+  const ranked = db.findQaLexical(projectId, normalized).map((entry) => ({ entry, confidence: lexicalOverlap(normalized, entry.normalizedQuestion) })).sort((a,b) => b.confidence - a.confidence);
   const eligible = ranked.filter((candidate) => candidate.confidence >= threshold);
   const fresh = eligible.find((candidate) => isFresh(candidate.entry));
   if (fresh) { db.touchQa(fresh.entry.id); return { status: 'hit', match: 'lexical', confidence: fresh.confidence, entry: { ...fresh.entry, hitCount: fresh.entry.hitCount + 1, lastUsedAt: new Date().toISOString() } }; }

@@ -23,6 +23,17 @@ interface ICacheRow {
   value: string;
 }
 
+export interface IFlowFinding {
+  id: number;
+  projectId: number;
+  runId: string;
+  file: string | null;
+  severity: 'low' | 'medium' | 'high';
+  message: string;
+  messageNorm: string;
+  createdAt: string;
+}
+
 export class ContextDatabase {
   private readonly db: Database.Database;
   readonly databasePath: string;
@@ -214,8 +225,18 @@ export class ContextDatabase {
     this.db.prepare('INSERT INTO flow_runs (id, projectId, task, mode, tier, status, worktreePath, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(input.id, input.projectId, input.task, input.mode, input.tier, input.status, input.worktreePath ?? null, new Date().toISOString());
   }
 
-  addFlowStep(input: { runId: string; phase: string; agent: string; model: string; status: string; durationMs: number; inputTokens?: number | null; outputTokens?: number | null; exitCode?: number | null; summary?: string; error?: string }): void {
-    this.db.prepare('INSERT INTO flow_steps (runId, phase, agent, model, status, durationMs, inputTokens, outputTokens, exitCode, summary, error, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(input.runId, input.phase, input.agent, input.model, input.status, input.durationMs, input.inputTokens ?? null, input.outputTokens ?? null, input.exitCode ?? null, input.summary ?? null, input.error ?? null, new Date().toISOString());
+  addFlowStep(input: { runId: string; phase: string; agent: string; model: string; status: string; durationMs: number; inputTokens?: number | null; outputTokens?: number | null; exitCode?: number | null; summary?: string; error?: string; modelClaimedApproved?: boolean | null; approved?: boolean | null }): void {
+    this.db.prepare('INSERT INTO flow_steps (runId, phase, agent, model, status, durationMs, inputTokens, outputTokens, exitCode, summary, error, modelClaimedApproved, approved, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(input.runId, input.phase, input.agent, input.model, input.status, input.durationMs, input.inputTokens ?? null, input.outputTokens ?? null, input.exitCode ?? null, input.summary ?? null, input.error ?? null, input.modelClaimedApproved == null ? null : Number(input.modelClaimedApproved), input.approved == null ? null : Number(input.approved), new Date().toISOString());
+  }
+
+  addFlowFinding(input: { projectId: number; runId: string; file?: string | null; severity: 'low' | 'medium' | 'high'; message: string; messageNorm: string }): IFlowFinding {
+    const createdAt = new Date().toISOString();
+    const result = this.db.prepare('INSERT INTO flow_findings (projectId, runId, file, severity, message, messageNorm, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(input.projectId, input.runId, input.file ?? null, input.severity, input.message, input.messageNorm, createdAt);
+    return this.db.prepare('SELECT * FROM flow_findings WHERE id = ?').get(Number(result.lastInsertRowid)) as IFlowFinding;
+  }
+
+  listFlowFindings(projectId: number, file?: string): IFlowFinding[] {
+    return (file === undefined ? this.db.prepare('SELECT * FROM flow_findings WHERE projectId = ? ORDER BY createdAt DESC, id DESC').all(projectId) : this.db.prepare('SELECT * FROM flow_findings WHERE projectId = ? AND file = ? ORDER BY createdAt DESC, id DESC').all(projectId, file)) as IFlowFinding[];
   }
 
   finishFlowRun(id: string, input: { status: string; patchPath?: string; iterations: number; error?: string }): void {
@@ -303,6 +324,18 @@ export class ContextDatabase {
       `
       )
       .all(ftsQuery, scope, limit) as ISearchResult[];
+  }
+
+  searchProject(query: string, projectId: number, limit: number, scope = 'general'): ISearchResult[] {
+    const ftsQuery = toFtsQuery(query);
+    if (!ftsQuery) return [];
+    return this.db.prepare(`
+      SELECT c.id, c.projectId, c.path, c.scope, c.kind, c.language, c.startLine, c.endLine, c.hash,
+        snippet(chunks_fts, 0, '[', ']', '...', 12) AS snippet, bm25(chunks_fts) AS rank
+      FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
+      WHERE chunks_fts MATCH ? AND c.projectId = ? AND c.scope = ?
+      ORDER BY rank ASC LIMIT ?
+    `).all(ftsQuery, projectId, scope, limit) as ISearchResult[];
   }
 
   stats(): IStats {

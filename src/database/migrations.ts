@@ -142,13 +142,31 @@ export function runMigrations(db: Database.Database): IMigrationReport[] {
       exitCode INTEGER,
       summary TEXT,
       error TEXT,
+      modelClaimedApproved INTEGER,
+      approved INTEGER,
       createdAt TEXT NOT NULL,
       FOREIGN KEY(runId) REFERENCES flow_runs(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS flow_findings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      projectId INTEGER NOT NULL,
+      runId TEXT NOT NULL,
+      file TEXT,
+      severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high')),
+      message TEXT NOT NULL,
+      messageNorm TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(runId) REFERENCES flow_runs(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_flow_findings_file ON flow_findings(projectId, file);
+    CREATE INDEX IF NOT EXISTS idx_flow_findings_norm ON flow_findings(projectId, messageNorm);
+
   `);
 
-  const reports = [migrateScope(db), migrateCacheScope(db), migrateQaValidityPolicy(db)];
+  const reports = [migrateScope(db), migrateCacheScope(db), migrateQaValidityPolicy(db), migrateFlowReviewMetadata(db)];
   db.exec('CREATE INDEX IF NOT EXISTS idx_chunks_scope ON chunks(scope)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_cache_scope ON cache(scope)');
   createChunkTriggers(db);
@@ -180,7 +198,20 @@ function createQaTriggers(db: Database.Database): void {
 }
 
 export function inspectMigrations(db: Database.Database): IMigrationReport[] {
-  return [inspectScopeMigration(db), inspectCacheScopeMigration(db), inspectQaValidityPolicy(db)];
+  return [inspectScopeMigration(db), inspectCacheScopeMigration(db), inspectQaValidityPolicy(db), inspectFlowReviewMetadata(db)];
+}
+
+function migrateFlowReviewMetadata(db: Database.Database): IMigrationReport {
+  const inspection = inspectFlowReviewMetadata(db);
+  if (inspection.status === 'unchanged') return inspection;
+  if (!hasColumn(db, 'flow_steps', 'modelClaimedApproved')) db.exec('ALTER TABLE flow_steps ADD COLUMN modelClaimedApproved INTEGER');
+  if (!hasColumn(db, 'flow_steps', 'approved')) db.exec('ALTER TABLE flow_steps ADD COLUMN approved INTEGER');
+  return { migration: 'flow-review-metadata', status: 'changed' };
+}
+
+function inspectFlowReviewMetadata(db: Database.Database): IMigrationReport {
+  if (hasColumn(db, 'flow_steps', 'modelClaimedApproved') && hasColumn(db, 'flow_steps', 'approved') && tableExists(db, 'flow_findings')) return { migration: 'flow-review-metadata', status: 'unchanged', reason: 'already-applied' };
+  return { migration: 'flow-review-metadata', status: 'would-migrate' };
 }
 
 function migrateQaValidityPolicy(db: Database.Database): IMigrationReport {

@@ -18,6 +18,12 @@ export interface IAgentExecutionConfig {
   timeoutMs: number;
 }
 
+export interface IWorkflowTestCommand {
+  command: string;
+  args?: string[];
+  timeoutMs?: number;
+}
+
 export interface IAdapterState {
   enabled: boolean;
   mode?: string;
@@ -40,7 +46,13 @@ export interface IGovernanceConfig {
     specsDir: string;
     mode: 'advisory' | 'execute';
   };
-  workflow?: { mode: 'codex' | 'claude' | 'codex+claude' | 'claude+codex'; maxIterations: number };
+  workflow?: {
+    mode: 'codex' | 'claude' | 'codex+claude' | 'claude+codex';
+    maxIterations: number;
+    failOnSeverity: 'high' | 'medium';
+    testCommand?: IWorkflowTestCommand;
+    reviewContext: boolean;
+  };
   generatedTemplates?: Record<string, string>;
   generatedScripts?: Record<string, string>;
 }
@@ -443,7 +455,7 @@ function createDefaultConfig(root: string): IGovernanceConfig {
       specsDir: 'docs/rods/specs',
       mode: 'advisory'
     },
-    workflow: { mode: 'codex', maxIterations: 3 }
+    workflow: { mode: 'codex', maxIterations: 3, failOnSeverity: 'high', reviewContext: false }
   };
 }
 

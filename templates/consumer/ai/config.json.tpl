@@ -49,7 +49,9 @@
   },
   "workflow": {
     "mode": "codex",
-    "maxIterations": 3
+    "maxIterations": 3,
+    "failOnSeverity": "high",
+    "reviewContext": false
   },
   "generatedTemplates": {}
 }

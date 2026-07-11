@@ -64,6 +64,7 @@ Esta versão adiciona cache Q&A com validade explícita, escalação real de mod
 | Limpeza e métricas | `qa prune --stale` remove entradas obsoletas com dry-run e filtro de idade; `qa stats` exclui stale dos totais principais. | O usuário controla o acúmulo de versões inválidas e a economia reportada permanece conservadora. |
 | Escalação executável | O tier `simple`, `medium` ou `high` seleciona modelos configurados nas CLIs locais quando `escalation.mode` é `execute`. | A classificação deixa de ser apenas advisory no fluxo automatizado, sem chamadas diretas às APIs dos provedores. |
 | Fluxo multiagente | `rods flow run` executa desenvolvimento e revisão com Codex/Claude em worktree isolada, loop limitado e review estruturado. | O resultado é auditável e entregue como patch, sem modificar automaticamente o workspace original. |
+| Acurácia da revisão | Gate de testes, coerência por severidade, diff transparente, memória lexical de findings e contexto opt-in reforçam o review. | Falhas determinísticas evitam chamadas desnecessárias, enquanto contexto e padrões recorrentes melhoram a decisão dentro de limites fixos. |
 | Uso de tokens | Adapters extraem tokens somente das saídas JSON oficiais disponíveis e registram `unavailable` quando ausentes. | Relatórios não inventam consumo e permitem enxergar custo por etapa e por agente. |
 | Migração SQLite | Bancos antigos recebem backfill de `scope=general` e entradas Q&A legadas são classificadas como `repository`. | Bases já indexadas preservam dados e comportamento após o upgrade. |
 | Fluxo de cards externos | Casos de eval documentam quando perguntar antes de buscar contexto. | Evita inferir requisitos de links externos sem confirmação. |
@@ -180,6 +181,7 @@ rods qa reclassify <id> --policy conceptual|files|repository [--files <paths>]
 rods qa prune --stale [--project <name>] [--older-than <days>] [--dry-run] [--json]
 rods qa stats [--project <name>] [--json]
 rods flow run <task> [--mode codex|claude|codex+claude|claude+codex] [--json]
+rods flow findings --file <path> [--project <name>] [--json]
 rods hook run --target codex|claude
 ```
 
@@ -261,7 +263,13 @@ Configure nomes de modelo explicitamente; o SDK não embute aliases que podem mu
     "codex": { "enabled": true, "execution": { "binary": "codex", "models": { "simple": "modelo-a", "medium": "modelo-b", "high": "modelo-c" }, "args": [], "timeoutMs": 900000 } },
     "claude": { "enabled": true, "execution": { "binary": "claude", "models": { "simple": "modelo-a", "medium": "modelo-b", "high": "modelo-c" }, "args": [], "timeoutMs": 900000 } }
   },
-  "workflow": { "mode": "codex+claude", "maxIterations": 3 }
+  "workflow": {
+    "mode": "codex+claude",
+    "maxIterations": 3,
+    "failOnSeverity": "high",
+    "testCommand": { "command": "npm", "args": ["test"], "timeoutMs": 600000 },
+    "reviewContext": false
+  }
 }
 ```
 
@@ -303,6 +311,12 @@ rods qa prune --stale --older-than 30
 ## Fluxo Multiagente
 
 `rods flow run` cria uma branch e worktree em `/tmp`, executa desenvolvimento e revisão em subprocessos e limita o loop por `workflow.maxIterations`. O revisor opera em modo somente leitura e precisa produzir JSON estruturado com `approved`, `summary` e `findings`.
+
+Antes da chamada ao revisor, o flow executa `workflow.testCommand` sem shell, quando configurado. Falha, timeout ou binário ausente geram um finding `high` e evitam a chamada de LLM naquela iteração. Depois da resposta, `failOnSeverity` reconcilia `approved` com os próprios findings do modelo; por padrão, qualquer finding `high` bloqueia a aprovação.
+
+O diff de revisão mantém orçamento máximo de 50 mil caracteres sem cortar patches no meio. Arquivos omitidos são declarados no prompt e continuam disponíveis no worktree somente leitura. Findings históricos do mesmo arquivo são agrupados por overlap lexical mínimo de `0.50`; até três padrões recorrentes entram no prompt, e `rods flow findings --file <path>` permite consultá-los manualmente. A retenção/prune desse histórico permanece dívida explícita; o flow reporta quantos findings e comparações foram consultados.
+
+`workflow.reviewContext` é opt-in. Quando habilitado, o revisor recebe no máximo cinco snippets compactos do Context Engine, sempre filtrados pelo projeto atual e sem leitura de chunks completos. Ausência de índice é fail-open e fica registrada nos metadados da etapa.
 
 O workspace original não recebe alterações automaticamente. Ao final, o comando mantém a worktree, gera um patch binário em `/tmp` e imprime o comando `git apply`. Uso de tokens é extraído apenas quando a saída JSON oficial da CLI o fornece; etapas sem dados aparecem como `unavailable`.
 

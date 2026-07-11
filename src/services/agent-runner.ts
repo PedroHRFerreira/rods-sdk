@@ -8,10 +8,15 @@ import type { AdapterTarget, IAgentExecutionConfig } from './adapters.js';
 
 export const ReviewSchema = z.object({ approved: z.boolean(), summary: z.string(), findings: z.array(z.object({ severity: z.enum(['low','medium','high']), message: z.string(), file: z.string().optional() })) });
 export type ReviewResult = z.infer<typeof ReviewSchema>;
-export interface IAgentResult { output: string; exitCode: number; durationMs: number; inputTokens: number | null; outputTokens: number | null; review?: ReviewResult; }
+export interface IAgentResult { output: string; exitCode: number; durationMs: number; inputTokens: number | null; outputTokens: number | null; review?: ReviewResult; modelClaimedApproved?: boolean; }
 
 const REVIEW_JSON_SCHEMA = { type: 'object', additionalProperties: false, properties: { approved: { type: 'boolean' }, summary: { type: 'string' }, findings: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { severity: { enum: ['low','medium','high'] }, message: { type: 'string' }, file: { type: 'string' } }, required: ['severity','message'] } } }, required: ['approved','summary','findings'] };
 const BANNED_ARGS = new Set(['--model','-m','--dangerously-bypass-approvals-and-sandbox','--dangerously-skip-permissions']);
+
+export function enforceApproval(review: ReviewResult, failOnSeverity: 'high' | 'medium' = 'high'): ReviewResult {
+  const blocking = review.findings.some((finding) => finding.severity === 'high' || (failOnSeverity === 'medium' && finding.severity === 'medium'));
+  return blocking ? { ...review, approved: false } : review;
+}
 
 function validate(config: IAgentExecutionConfig, tier: ComplexityLevel): string {
   if (!config.binary.trim()) throw new Error('Agent binary is not configured');
@@ -38,7 +43,7 @@ function extractOutput(agent: AdapterTarget, stdout: string): { output: string; 
   return { output: messages.at(-1) ?? stdout.trim(), usage };
 }
 
-export async function runAgent(input: { agent: AdapterTarget; config: IAgentExecutionConfig; tier: ComplexityLevel; cwd: string; prompt: string; review?: boolean }): Promise<IAgentResult> {
+export async function runAgent(input: { agent: AdapterTarget; config: IAgentExecutionConfig; tier: ComplexityLevel; cwd: string; prompt: string; review?: boolean; failOnSeverity?: 'high' | 'medium' }): Promise<IAgentResult> {
   const model = validate(input.config, input.tier); const started = Date.now();
   const schemaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'rods-schema-')); const schemaPath = path.join(schemaDir, 'review.json');
   if (input.review) await fs.writeFile(schemaPath, JSON.stringify(REVIEW_JSON_SCHEMA));
@@ -47,7 +52,7 @@ export async function runAgent(input: { agent: AdapterTarget; config: IAgentExec
     : ['--print','--model',model,'--output-format','json','--no-session-persistence','--permission-mode', input.review ? 'plan' : 'acceptEdits', ...(input.review ? ['--json-schema',JSON.stringify(REVIEW_JSON_SCHEMA)] : []), ...input.config.args, input.prompt];
   return await new Promise((resolve, reject) => {
     const child = spawn(input.config.binary, args, { cwd: input.cwd, stdio: ['pipe','pipe','pipe'] }); let stdout = '', stderr = '', settled = false;
-    const finish = (error?: Error, code = -1) => { if (settled) return; settled = true; clearTimeout(timer); void fs.rm(schemaDir, { recursive: true, force: true }); if (error) { reject(error); return; } const parsed = extractOutput(input.agent, stdout); if (code !== 0) { reject(new Error(`${input.agent} exited ${code}: ${(stderr.trim() || parsed.output).slice(0, 4000)}`)); return; } try { const review = input.review ? ReviewSchema.parse(JSON.parse(parsed.output)) : undefined; resolve({ output: parsed.output, exitCode: code, durationMs: Date.now() - started, inputTokens: parsed.usage.input, outputTokens: parsed.usage.output, review }); } catch (cause) { reject(new Error(`Invalid structured review from ${input.agent}: ${cause instanceof Error ? cause.message : String(cause)}; output=${JSON.stringify(parsed.output.slice(0, 4000))}`)); } };
+    const finish = (error?: Error, code = -1) => { if (settled) return; settled = true; clearTimeout(timer); void fs.rm(schemaDir, { recursive: true, force: true }); if (error) { reject(error); return; } const parsed = extractOutput(input.agent, stdout); if (code !== 0) { reject(new Error(`${input.agent} exited ${code}: ${(stderr.trim() || parsed.output).slice(0, 4000)}`)); return; } try { const claimed = input.review ? ReviewSchema.parse(JSON.parse(parsed.output)) : undefined; const review = claimed ? enforceApproval(claimed, input.failOnSeverity) : undefined; resolve({ output: parsed.output, exitCode: code, durationMs: Date.now() - started, inputTokens: parsed.usage.input, outputTokens: parsed.usage.output, review, modelClaimedApproved: claimed?.approved }); } catch (cause) { reject(new Error(`Invalid structured review from ${input.agent}: ${cause instanceof Error ? cause.message : String(cause)}; output=${JSON.stringify(parsed.output.slice(0, 4000))}`)); } };
     const timer = setTimeout(() => { child.kill('SIGTERM'); finish(new Error(`${input.agent} timed out after ${input.config.timeoutMs}ms`)); }, input.config.timeoutMs);
     child.stdout.on('data', (chunk) => { stdout += chunk; }); child.stderr.on('data', (chunk) => { stderr += chunk; }); child.stdin.on('error', (error: NodeJS.ErrnoException) => { if (error.code !== 'EPIPE') finish(error); }); child.on('error', (error) => finish(error)); child.on('close', (code) => finish(undefined, code ?? -1));
     if (input.agent === 'codex') child.stdin.end(input.prompt); else child.stdin.end();

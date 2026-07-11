@@ -79,7 +79,9 @@ test('runMigrations backfills scope for pre-scope databases without data loss', 
     assert.equal(secondRun.find((report) => report.migration === 'scope-column')?.status, 'unchanged');
     assert.equal(secondRun.find((report) => report.migration === 'cache-scope-column')?.status, 'unchanged');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','trigger')").all() as Array<{ name: string }>;
-    for (const name of ['qa_answers','qa_questions','qa_questions_fts','flow_runs','flow_steps','qa_questions_ai','qa_questions_ad','qa_questions_au']) assert.ok(tables.some((entry) => entry.name === name), `missing ${name}`);
+    for (const name of ['qa_answers','qa_questions','qa_questions_fts','flow_runs','flow_steps','flow_findings','qa_questions_ai','qa_questions_ad','qa_questions_au']) assert.ok(tables.some((entry) => entry.name === name), `missing ${name}`);
+    const flowColumns = db.prepare('PRAGMA table_info(flow_steps)').all() as Array<{ name: string }>;
+    assert.ok(flowColumns.some((column) => column.name === 'modelClaimedApproved')); assert.ok(flowColumns.some((column) => column.name === 'approved'));
   } finally {
     db.close();
   }
@@ -112,5 +114,23 @@ test('runMigrations classifies legacy Q&A rows as repository and preserves their
     assert.doesNotThrow(() => db.prepare("INSERT INTO qa_question_files VALUES (9, 'README.md', 'hash')").run());
     assert.equal(runMigrations(db).find((report) => report.migration === 'qa-validity-policy')?.status, 'unchanged');
     assert.equal(inspectMigrations(db).find((report) => report.migration === 'qa-validity-policy')?.status, 'unchanged');
+  } finally { db.close(); }
+});
+
+test('runMigrations adds review audit columns to existing flow steps without data loss', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'flow-review-migration-')); const db = new Database(path.join(root, 'context.db'));
+  try {
+    db.exec(`
+      CREATE TABLE projects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, root TEXT NOT NULL UNIQUE, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL);
+      CREATE TABLE flow_runs (id TEXT PRIMARY KEY, projectId INTEGER NOT NULL, task TEXT NOT NULL, mode TEXT NOT NULL, tier TEXT NOT NULL, status TEXT NOT NULL, worktreePath TEXT, patchPath TEXT, iterations INTEGER NOT NULL DEFAULT 0, createdAt TEXT NOT NULL, finishedAt TEXT, error TEXT);
+      CREATE TABLE flow_steps (id INTEGER PRIMARY KEY AUTOINCREMENT, runId TEXT NOT NULL, phase TEXT NOT NULL, agent TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, durationMs INTEGER NOT NULL, inputTokens INTEGER, outputTokens INTEGER, exitCode INTEGER, summary TEXT, error TEXT, createdAt TEXT NOT NULL);
+      INSERT INTO projects VALUES (1, 'project', '/tmp/project', 'created', 'updated');
+      INSERT INTO flow_runs VALUES ('run', 1, 'task', 'codex', 'simple', 'running', NULL, NULL, 0, 'created', NULL, NULL);
+      INSERT INTO flow_steps VALUES (2, 'run', 'review', 'codex', 'model', 'approved', 10, 1, 1, 0, 'summary', NULL, 'created');
+    `);
+    const report = runMigrations(db).find((item) => item.migration === 'flow-review-metadata'); assert.equal(report?.status, 'changed');
+    const row = db.prepare('SELECT id, summary, modelClaimedApproved, approved FROM flow_steps WHERE id = 2').get() as { id: number; summary: string; modelClaimedApproved: null; approved: null };
+    assert.equal(row.summary, 'summary'); assert.equal(row.modelClaimedApproved, null); assert.equal(row.approved, null);
+    assert.equal(runMigrations(db).find((item) => item.migration === 'flow-review-metadata')?.status, 'unchanged');
   } finally { db.close(); }
 });
