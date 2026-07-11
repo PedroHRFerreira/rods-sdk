@@ -67,18 +67,179 @@ export function runMigrations(db: Database.Database): IMigrationReport[] {
       content_rowid='id'
     );
 
+    CREATE TABLE IF NOT EXISTS qa_answers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      projectId INTEGER NOT NULL,
+      summary TEXT NOT NULL,
+      fullAnswer TEXT,
+      sourceTokens INTEGER,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS qa_questions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      projectId INTEGER NOT NULL,
+      answerId INTEGER NOT NULL,
+      rawQuestion TEXT NOT NULL,
+      normalizedQuestion TEXT NOT NULL,
+      questionHash TEXT NOT NULL,
+      policy TEXT NOT NULL CHECK (policy IN ('conceptual', 'files', 'repository')),
+      fingerprint TEXT NOT NULL,
+      normalizationVersion INTEGER NOT NULL DEFAULT 1,
+      hitCount INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      lastUsedAt TEXT NOT NULL,
+      FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(answerId) REFERENCES qa_answers(id) ON DELETE CASCADE,
+      UNIQUE(projectId, questionHash, policy, fingerprint)
+    );
+
+    CREATE TABLE IF NOT EXISTS qa_question_files (
+      questionId INTEGER NOT NULL,
+      filePath TEXT NOT NULL,
+      fileHash TEXT NOT NULL,
+      PRIMARY KEY(questionId, filePath),
+      FOREIGN KEY(questionId) REFERENCES qa_questions(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_qa_questions_hash ON qa_questions(projectId, questionHash);
+    CREATE INDEX IF NOT EXISTS idx_qa_questions_project ON qa_questions(projectId);
+    CREATE VIRTUAL TABLE IF NOT EXISTS qa_questions_fts USING fts5(
+      normalizedQuestion,
+      projectId UNINDEXED,
+      content='qa_questions',
+      content_rowid='id'
+    );
+
+    CREATE TABLE IF NOT EXISTS flow_runs (
+      id TEXT PRIMARY KEY,
+      projectId INTEGER NOT NULL,
+      task TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      tier TEXT NOT NULL,
+      status TEXT NOT NULL,
+      worktreePath TEXT,
+      patchPath TEXT,
+      iterations INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      finishedAt TEXT,
+      error TEXT,
+      FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS flow_steps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      runId TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      agent TEXT NOT NULL,
+      model TEXT NOT NULL,
+      status TEXT NOT NULL,
+      durationMs INTEGER NOT NULL,
+      inputTokens INTEGER,
+      outputTokens INTEGER,
+      exitCode INTEGER,
+      summary TEXT,
+      error TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY(runId) REFERENCES flow_runs(id) ON DELETE CASCADE
+    );
+
   `);
 
-  const reports = [migrateScope(db), migrateCacheScope(db)];
+  const reports = [migrateScope(db), migrateCacheScope(db), migrateQaValidityPolicy(db)];
   db.exec('CREATE INDEX IF NOT EXISTS idx_chunks_scope ON chunks(scope)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_cache_scope ON cache(scope)');
   createChunkTriggers(db);
+  createQaTriggers(db);
 
   return reports;
 }
 
+function createQaTriggers(db: Database.Database): void {
+  db.exec(`
+    DROP TRIGGER IF EXISTS qa_questions_ai;
+    DROP TRIGGER IF EXISTS qa_questions_ad;
+    DROP TRIGGER IF EXISTS qa_questions_au;
+    CREATE TRIGGER qa_questions_ai AFTER INSERT ON qa_questions BEGIN
+      INSERT INTO qa_questions_fts(rowid, normalizedQuestion, projectId)
+      VALUES (new.id, new.normalizedQuestion, new.projectId);
+    END;
+    CREATE TRIGGER qa_questions_ad AFTER DELETE ON qa_questions BEGIN
+      INSERT INTO qa_questions_fts(qa_questions_fts, rowid, normalizedQuestion, projectId)
+      VALUES ('delete', old.id, old.normalizedQuestion, old.projectId);
+    END;
+    CREATE TRIGGER qa_questions_au AFTER UPDATE ON qa_questions BEGIN
+      INSERT INTO qa_questions_fts(qa_questions_fts, rowid, normalizedQuestion, projectId)
+      VALUES ('delete', old.id, old.normalizedQuestion, old.projectId);
+      INSERT INTO qa_questions_fts(rowid, normalizedQuestion, projectId)
+      VALUES (new.id, new.normalizedQuestion, new.projectId);
+    END;
+  `);
+}
+
 export function inspectMigrations(db: Database.Database): IMigrationReport[] {
-  return [inspectScopeMigration(db), inspectCacheScopeMigration(db)];
+  return [inspectScopeMigration(db), inspectCacheScopeMigration(db), inspectQaValidityPolicy(db)];
+}
+
+function migrateQaValidityPolicy(db: Database.Database): IMigrationReport {
+  const inspection = inspectQaValidityPolicy(db);
+  if (inspection.status === 'unchanged') return inspection;
+
+  db.transaction(() => {
+    db.exec(`
+      DROP TRIGGER IF EXISTS qa_questions_ai;
+      DROP TRIGGER IF EXISTS qa_questions_ad;
+      DROP TRIGGER IF EXISTS qa_questions_au;
+      DROP TABLE IF EXISTS qa_questions_fts;
+      DROP TABLE IF EXISTS qa_question_files;
+      ALTER TABLE qa_questions RENAME TO qa_questions_legacy;
+      CREATE TABLE qa_questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        projectId INTEGER NOT NULL,
+        answerId INTEGER NOT NULL,
+        rawQuestion TEXT NOT NULL,
+        normalizedQuestion TEXT NOT NULL,
+        questionHash TEXT NOT NULL,
+        policy TEXT NOT NULL CHECK (policy IN ('conceptual', 'files', 'repository')),
+        fingerprint TEXT NOT NULL,
+        normalizationVersion INTEGER NOT NULL DEFAULT 1,
+        hitCount INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL,
+        lastUsedAt TEXT NOT NULL,
+        FOREIGN KEY(projectId) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY(answerId) REFERENCES qa_answers(id) ON DELETE CASCADE,
+        UNIQUE(projectId, questionHash, policy, fingerprint)
+      );
+      INSERT INTO qa_questions (
+        id, projectId, answerId, rawQuestion, normalizedQuestion, questionHash,
+        policy, fingerprint, normalizationVersion, hitCount, createdAt, lastUsedAt
+      )
+      SELECT id, projectId, answerId, rawQuestion, normalizedQuestion, questionHash,
+        'repository', fingerprint, normalizationVersion, hitCount, createdAt, lastUsedAt
+      FROM qa_questions_legacy;
+      DROP TABLE qa_questions_legacy;
+      CREATE TABLE IF NOT EXISTS qa_question_files (
+        questionId INTEGER NOT NULL,
+        filePath TEXT NOT NULL,
+        fileHash TEXT NOT NULL,
+        PRIMARY KEY(questionId, filePath),
+        FOREIGN KEY(questionId) REFERENCES qa_questions(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_qa_questions_hash ON qa_questions(projectId, questionHash);
+      CREATE INDEX IF NOT EXISTS idx_qa_questions_project ON qa_questions(projectId);
+      CREATE VIRTUAL TABLE qa_questions_fts USING fts5(
+        normalizedQuestion,
+        projectId UNINDEXED,
+        content='qa_questions',
+        content_rowid='id'
+      );
+      INSERT INTO qa_questions_fts(rowid, normalizedQuestion, projectId)
+      SELECT id, normalizedQuestion, projectId FROM qa_questions;
+    `);
+  })();
+  return { migration: 'qa-validity-policy', status: 'changed' };
 }
 
 function migrateScope(db: Database.Database): IMigrationReport {
@@ -189,6 +350,17 @@ function inspectCacheScopeMigration(db: Database.Database): IMigrationReport {
   }
 
   return { migration: 'cache-scope-column', status: 'would-migrate' };
+}
+
+function inspectQaValidityPolicy(db: Database.Database): IMigrationReport {
+  if (hasColumn(db, 'qa_questions', 'policy') && tableExists(db, 'qa_question_files')) {
+    return { migration: 'qa-validity-policy', status: 'unchanged', reason: 'already-applied' };
+  }
+  return { migration: 'qa-validity-policy', status: 'would-migrate' };
+}
+
+function tableExists(db: Database.Database, table: string): boolean {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
 }
 
 function hasColumn(db: Database.Database, table: string, columnName: string): boolean {

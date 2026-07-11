@@ -49,7 +49,7 @@ context --help
 
 ## Principais Atualizações
 
-Esta versão adiciona automação de governança, atualização seletiva de templates e isolamento de contexto de revisão.
+Esta versão adiciona cache Q&A com validade explícita, escalação real de modelos, métricas de uso e orquestração CLI-first entre Codex e Claude, além das melhorias de governança já existentes.
 
 | Área | O que mudou | Impacto no framework |
 |---|---|---|
@@ -59,7 +59,13 @@ Esta versão adiciona automação de governança, atualização seletiva de temp
 | Upgrade | `rods upgrade` atualiza templates seletivamente, preserva arquivos customizados e tem `--dry-run`. | Projetos consumidores conseguem receber melhorias do SDK sem perder ajustes locais. |
 | Skills | Foram adicionadas skills de `review`, `architecture` e `quality`. | Agentes passam a ter regras versionadas para revisão, arquitetura e validação. |
 | Context Engine | `ingest` e `search` aceitam `--scope`, com `general` como padrão e `review` para revisão. | Contextos de revisão ficam isolados do índice geral sem criar outro projeto. |
-| Migração SQLite | Bancos antigos recebem backfill de `scope=general`. | Bases já indexadas continuam funcionando após o upgrade. |
+| Cache Q&A | `rods qa` armazena, consulta, lista, reclassifica, invalida e limpa respostas reutilizáveis com hash exato e FTS5 lexical. | Perguntas repetidas podem reaproveitar respostas sem nova ingestão ou chamada automática de agente. |
+| Validade do cache | Cada entrada usa policy explícita `conceptual`, `files` ou `repository`; dependências por arquivo são verificadas por SHA-256. | Commits irrelevantes não invalidam respostas conceituais ou respostas ligadas apenas a arquivos específicos. |
+| Limpeza e métricas | `qa prune --stale` remove entradas obsoletas com dry-run e filtro de idade; `qa stats` exclui stale dos totais principais. | O usuário controla o acúmulo de versões inválidas e a economia reportada permanece conservadora. |
+| Escalação executável | O tier `simple`, `medium` ou `high` seleciona modelos configurados nas CLIs locais quando `escalation.mode` é `execute`. | A classificação deixa de ser apenas advisory no fluxo automatizado, sem chamadas diretas às APIs dos provedores. |
+| Fluxo multiagente | `rods flow run` executa desenvolvimento e revisão com Codex/Claude em worktree isolada, loop limitado e review estruturado. | O resultado é auditável e entregue como patch, sem modificar automaticamente o workspace original. |
+| Uso de tokens | Adapters extraem tokens somente das saídas JSON oficiais disponíveis e registram `unavailable` quando ausentes. | Relatórios não inventam consumo e permitem enxergar custo por etapa e por agente. |
+| Migração SQLite | Bancos antigos recebem backfill de `scope=general` e entradas Q&A legadas são classificadas como `repository`. | Bases já indexadas preservam dados e comportamento após o upgrade. |
 | Fluxo de cards externos | Casos de eval documentam quando perguntar antes de buscar contexto. | Evita inferir requisitos de links externos sem confirmação. |
 
 ## Atualizar Projetos Consumidores
@@ -166,6 +172,14 @@ rods adapter enable <rtk|claude-mem|caveman> [path] [--force]
 rods adapter sync [path] --target codex|claude [--codex-skills-dir <path>] [--force]
 rods adapter doctor [path] [--target codex|claude]
 rods escalation classify <task> [--files <files>] [--root <path>] [--json]
+rods qa store --question <text> --answer <text|-> --policy conceptual|files|repository [--files <paths>] [--summary <text>] [--tokens <count>]
+rods qa search <question> [--threshold 0.75] [--json]
+rods qa list [--project <name>] [--stale] [--json]
+rods qa invalidate <id>
+rods qa reclassify <id> --policy conceptual|files|repository [--files <paths>]
+rods qa prune --stale [--project <name>] [--older-than <days>] [--dry-run] [--json]
+rods qa stats [--project <name>] [--json]
+rods flow run <task> [--mode codex|claude|codex+claude|claude+codex] [--json]
 rods hook run --target codex|claude
 ```
 
@@ -236,7 +250,20 @@ A execução é CLI-first por padrão:
 
 ## Escalonamento De Modelo
 
-`rods escalation classify <task>` classifica a complexidade da tarefa e recomenda uma classe de modelo: `economy`, `balanced` ou `high-capability`. Essa recomendação é orientação textual de governança. O rods-sdk não troca o modelo ativo, não chama APIs de provedores de IA, não edita configuração do Codex/Claude e não faz roteamento automático entre modelos. O campo `changesConfiguration` existe para deixar esse contrato explícito e atualmente é sempre `false`.
+`rods escalation classify <task>` continua classificando a tarefa e recomendando uma classe de modelo. Em `escalation.mode: "advisory"` nada é executado, preservando o comportamento das configurações antigas. Em `"execute"`, `rods flow run` usa o tier para selecionar o modelo configurado e chama exclusivamente as CLIs locais.
+
+Configure nomes de modelo explicitamente; o SDK não embute aliases que podem mudar entre versões:
+
+```json
+{
+  "escalation": { "enabled": true, "mode": "execute", "policyPath": ".ai/policies/complexity.md", "specsDir": "docs/rods/specs" },
+  "targets": {
+    "codex": { "enabled": true, "execution": { "binary": "codex", "models": { "simple": "modelo-a", "medium": "modelo-b", "high": "modelo-c" }, "args": [], "timeoutMs": 900000 } },
+    "claude": { "enabled": true, "execution": { "binary": "claude", "models": { "simple": "modelo-a", "medium": "modelo-b", "high": "modelo-c" }, "args": [], "timeoutMs": 900000 } }
+  },
+  "workflow": { "mode": "codex+claude", "maxIterations": 3 }
+}
+```
 
 Quando executado via lifecycle hook, `rods hook run --target codex|claude` injeta a recomendação em `additionalContext` no evento `UserPromptSubmit`, junto com avisos de planejamento/revisão quando aplicáveis. O agente ou a pessoa operando a sessão ainda precisa ler essa sugestão e decidir manualmente se muda de modelo ou altera o plano de execução.
 
@@ -247,6 +274,39 @@ rods escalation classify "corrigir typo no README" --files README.md
 ```
 
 Se `--files` for omitido, o classificador usa `git diff --name-only` no repositório atual como fallback. Isso é útil para classificar a mudança em andamento, mas pode surpreender em repositórios com alterações não commitadas: dois textos de tarefa diferentes podem produzir o mesmo resultado quando o diff local é o mesmo.
+
+## Cache Q&A
+
+O cache é lexical, não semântico. Perguntas são normalizadas e consultadas primeiro por hash exato; depois, o FTS5 retorna até três candidatos e um overlap determinístico decide o reuso. O threshold padrão é conservador (`0.75`) e pode ser alterado em `qa search`.
+
+```bash
+rods qa store --question "o que é este projeto?" --answer - --policy conceptual --tokens 420 < resposta.md
+rods qa store --question "como funciona o parser?" --answer - --policy files --files src/parser.ts < resposta.md
+rods qa store --question "qual é o estado atual?" --answer - --policy repository < resposta.md
+rods qa search "como configuro o projeto?"
+rods qa list --stale
+rods qa stats
+```
+
+`--policy` é obrigatório na CLI: `conceptual` não depende do Git, `files` depende somente dos arquivos declarados e `repository` usa o fingerprint global de commit, diff e arquivos não rastreados. `files` exige uma lista não vazia de arquivos existentes dentro do projeto. Chamadas programáticas que omitirem a política usam `repository` por segurança.
+
+Entradas stale são auditáveis e não são retornadas como hit quando existe candidato fresco. Reclassifique uma entrada explicitamente ou limpe stale em lote:
+
+```bash
+rods qa reclassify 12 --policy files --files src/parser.ts
+rods qa prune --stale --older-than 30 --dry-run
+rods qa prune --stale --older-than 30
+```
+
+`prune` nunca remove somente por idade: `--stale` é obrigatório. A remoção libera páginas para reuso pelo SQLite, mas não reduz necessariamente o arquivo sem `VACUUM`. Em `qa stats`, `hits` e `tokensSaved` incluem apenas entradas atualmente frescas; hits e tokens stale aparecem separadamente como excluídos, e números de tokens só usam contagens conhecidas.
+
+## Fluxo Multiagente
+
+`rods flow run` cria uma branch e worktree em `/tmp`, executa desenvolvimento e revisão em subprocessos e limita o loop por `workflow.maxIterations`. O revisor opera em modo somente leitura e precisa produzir JSON estruturado com `approved`, `summary` e `findings`.
+
+O workspace original não recebe alterações automaticamente. Ao final, o comando mantém a worktree, gera um patch binário em `/tmp` e imprime o comando `git apply`. Uso de tokens é extraído apenas quando a saída JSON oficial da CLI o fornece; etapas sem dados aparecem como `unavailable`.
+
+Configurações v2 com `modelAdviceOnly` são interpretadas como `advisory`. Rode `rods upgrade --dry-run` antes de atualizar o template; arquivos `.ai/config.json` customizados são preservados e devem receber os novos campos manualmente.
 
 ## Adaptadores Opcionais
 

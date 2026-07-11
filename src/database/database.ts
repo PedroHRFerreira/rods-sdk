@@ -6,6 +6,9 @@ import type {
   IChunkInput,
   IContextConfig,
   IProject,
+  IQaEntry,
+  IQaFile,
+  TQaPolicy,
   ISearchResult,
   IStats
 } from '../types/context.js';
@@ -109,6 +112,114 @@ export class ContextDatabase {
       `
       )
       .run(key, scope, value, now, now);
+  }
+
+  storeQa(input: { projectId: number; question: string; normalized: string; hash: string; fingerprint: string; policy?: TQaPolicy; files?: IQaFile[]; summary: string; fullAnswer?: string; tokens?: number }): IQaEntry {
+    const now = new Date().toISOString();
+    const policy = input.policy ?? 'repository';
+    const store = this.db.transaction(() => {
+      const existing = this.db.prepare('SELECT id, answerId FROM qa_questions WHERE projectId = ? AND questionHash = ? AND policy = ? AND fingerprint = ?').get(input.projectId, input.hash, policy, input.fingerprint) as { id: number; answerId: number } | undefined;
+      if (existing) {
+        this.db.prepare('UPDATE qa_answers SET summary = ?, fullAnswer = ?, sourceTokens = ?, updatedAt = ? WHERE id = ?').run(input.summary, input.fullAnswer ?? null, input.tokens ?? null, now, existing.answerId);
+        this.db.prepare('UPDATE qa_questions SET rawQuestion = ?, normalizedQuestion = ?, lastUsedAt = ? WHERE id = ?').run(input.question, input.normalized, now, existing.id);
+        this.replaceQaFiles(existing.id, input.files ?? []);
+        return existing.id;
+      }
+      const shared = this.db.prepare('SELECT id FROM qa_answers WHERE projectId = ? AND summary = ? AND COALESCE(fullAnswer, ?) = ? ORDER BY id LIMIT 1').get(input.projectId, input.summary, '', input.fullAnswer ?? '') as { id: number } | undefined;
+      const answerId = shared?.id ?? Number(this.db.prepare('INSERT INTO qa_answers (projectId, summary, fullAnswer, sourceTokens, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)').run(input.projectId, input.summary, input.fullAnswer ?? null, input.tokens ?? null, now, now).lastInsertRowid);
+      const question = this.db.prepare('INSERT INTO qa_questions (projectId, answerId, rawQuestion, normalizedQuestion, questionHash, policy, fingerprint, createdAt, lastUsedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(input.projectId, answerId, input.question, input.normalized, input.hash, policy, input.fingerprint, now, now);
+      const id = Number(question.lastInsertRowid);
+      this.replaceQaFiles(id, input.files ?? []);
+      return id;
+    });
+    return this.getQaById(store())!;
+  }
+
+  getQaById(id: number): IQaEntry | null {
+    const row = this.db.prepare('SELECT q.*, a.summary, a.fullAnswer, a.sourceTokens FROM qa_questions q JOIN qa_answers a ON a.id = q.answerId WHERE q.id = ?').get(id) as Omit<IQaEntry, 'files'> | undefined;
+    return row ? this.hydrateQa(row) : null;
+  }
+
+  findQaExact(projectId: number, hash: string): IQaEntry[] {
+    const rows = this.db.prepare('SELECT q.*, a.summary, a.fullAnswer, a.sourceTokens FROM qa_questions q JOIN qa_answers a ON a.id = q.answerId WHERE q.projectId = ? AND q.questionHash = ? ORDER BY q.lastUsedAt DESC').all(projectId, hash) as Array<Omit<IQaEntry, 'files'>>;
+    return rows.map((row) => this.hydrateQa(row));
+  }
+
+  findQaLexical(projectId: number, query: string, limit = 3): IQaEntry[] {
+    const fts = toFtsAnyQuery(query);
+    if (!fts) return [];
+    const rows = this.db.prepare(`SELECT q.*, a.summary, a.fullAnswer, a.sourceTokens FROM qa_questions_fts f JOIN qa_questions q ON q.id = f.rowid JOIN qa_answers a ON a.id = q.answerId WHERE qa_questions_fts MATCH ? AND q.projectId = ? ORDER BY bm25(qa_questions_fts) LIMIT ?`).all(fts, projectId, limit) as Array<Omit<IQaEntry, 'files'>>;
+    return rows.map((row) => this.hydrateQa(row));
+  }
+
+  touchQa(id: number): void {
+    this.db.prepare('UPDATE qa_questions SET hitCount = hitCount + 1, lastUsedAt = ? WHERE id = ?').run(new Date().toISOString(), id);
+  }
+
+  listQa(projectId?: number): IQaEntry[] {
+    const sql = 'SELECT q.*, a.summary, a.fullAnswer, a.sourceTokens FROM qa_questions q JOIN qa_answers a ON a.id = q.answerId';
+    const rows = (projectId ? this.db.prepare(`${sql} WHERE q.projectId = ? ORDER BY q.lastUsedAt DESC`).all(projectId) : this.db.prepare(`${sql} ORDER BY q.lastUsedAt DESC`).all()) as Array<Omit<IQaEntry, 'files'>>;
+    return rows.map((row) => this.hydrateQa(row));
+  }
+
+  reclassifyQa(id: number, policy: TQaPolicy, fingerprint: string, files: IQaFile[]): IQaEntry {
+    const update = this.db.transaction(() => {
+      const current = this.getQaById(id);
+      if (!current) throw new Error(`Unknown Q&A entry: ${id}`);
+      this.db.prepare('UPDATE qa_questions SET policy = ?, fingerprint = ? WHERE id = ?').run(policy, fingerprint, id);
+      this.replaceQaFiles(id, files);
+    });
+    update();
+    return this.getQaById(id)!;
+  }
+
+  pruneQa(ids: number[], dryRun = false): { entries: number; orphanAnswers: number; logicalBytes: number } {
+    if (!ids.length) return { entries: 0, orphanAnswers: 0, logicalBytes: 0 };
+    const placeholders = ids.map(() => '?').join(',');
+    const questionSize = this.db.prepare(`SELECT COALESCE(SUM(length(rawQuestion) + length(normalizedQuestion) + length(questionHash) + length(policy) + length(fingerprint)), 0) AS bytes FROM qa_questions WHERE id IN (${placeholders})`).get(...ids) as { bytes: number };
+    const fileSize = this.db.prepare(`SELECT COALESCE(SUM(length(filePath) + length(fileHash)), 0) AS bytes FROM qa_question_files WHERE questionId IN (${placeholders})`).get(...ids) as { bytes: number };
+    const answerIds = this.db.prepare(`SELECT DISTINCT answerId FROM qa_questions WHERE id IN (${placeholders})`).all(...ids) as Array<{ answerId: number }>;
+    const orphanAnswerIds = answerIds.filter(({ answerId }) => {
+      const row = this.db.prepare(`SELECT COUNT(*) AS count FROM qa_questions WHERE answerId = ? AND id NOT IN (${placeholders})`).get(answerId, ...ids) as ICountRow;
+      return row.count === 0;
+    }).map(({ answerId }) => answerId);
+    const answerSize = orphanAnswerIds.length ? this.db.prepare(`SELECT COALESCE(SUM(length(summary) + length(COALESCE(fullAnswer, ''))), 0) AS bytes FROM qa_answers WHERE id IN (${orphanAnswerIds.map(() => '?').join(',')})`).get(...orphanAnswerIds) as { bytes: number } : { bytes: 0 };
+    if (!dryRun) this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM qa_questions WHERE id IN (${placeholders})`).run(...ids);
+      for (const { answerId } of answerIds) this.db.prepare('DELETE FROM qa_answers WHERE id = ? AND NOT EXISTS (SELECT 1 FROM qa_questions WHERE answerId = ?)').run(answerId, answerId);
+    })();
+    return { entries: ids.length, orphanAnswers: orphanAnswerIds.length, logicalBytes: questionSize.bytes + fileSize.bytes + answerSize.bytes };
+  }
+
+  private hydrateQa(row: Omit<IQaEntry, 'files'>): IQaEntry {
+    const files = this.db.prepare('SELECT filePath, fileHash FROM qa_question_files WHERE questionId = ? ORDER BY filePath').all(row.id) as IQaFile[];
+    return { ...row, files };
+  }
+
+  private replaceQaFiles(questionId: number, files: IQaFile[]): void {
+    this.db.prepare('DELETE FROM qa_question_files WHERE questionId = ?').run(questionId);
+    const insert = this.db.prepare('INSERT INTO qa_question_files (questionId, filePath, fileHash) VALUES (?, ?, ?)');
+    for (const file of files) insert.run(questionId, file.filePath, file.fileHash);
+  }
+
+  invalidateQa(id: number): boolean {
+    const answer = this.db.prepare('SELECT answerId FROM qa_questions WHERE id = ?').get(id) as { answerId: number } | undefined;
+    if (!answer) return false;
+    this.db.prepare('DELETE FROM qa_questions WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM qa_answers WHERE id = ? AND NOT EXISTS (SELECT 1 FROM qa_questions WHERE answerId = ?)').run(answer.answerId, answer.answerId);
+    return true;
+  }
+
+  createFlowRun(input: { id: string; projectId: number; task: string; mode: string; tier: string; status: string; worktreePath?: string }): void {
+    this.db.prepare('INSERT INTO flow_runs (id, projectId, task, mode, tier, status, worktreePath, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(input.id, input.projectId, input.task, input.mode, input.tier, input.status, input.worktreePath ?? null, new Date().toISOString());
+  }
+
+  addFlowStep(input: { runId: string; phase: string; agent: string; model: string; status: string; durationMs: number; inputTokens?: number | null; outputTokens?: number | null; exitCode?: number | null; summary?: string; error?: string }): void {
+    this.db.prepare('INSERT INTO flow_steps (runId, phase, agent, model, status, durationMs, inputTokens, outputTokens, exitCode, summary, error, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(input.runId, input.phase, input.agent, input.model, input.status, input.durationMs, input.inputTokens ?? null, input.outputTokens ?? null, input.exitCode ?? null, input.summary ?? null, input.error ?? null, new Date().toISOString());
+  }
+
+  finishFlowRun(id: string, input: { status: string; patchPath?: string; iterations: number; error?: string }): void {
+    this.db.prepare('UPDATE flow_runs SET status = ?, patchPath = ?, iterations = ?, error = ?, finishedAt = ? WHERE id = ?').run(input.status, input.patchPath ?? null, input.iterations, input.error ?? null, new Date().toISOString(), id);
   }
 
   replaceChunksForPath(filePath: string, chunks: IChunkInput[]): number {
@@ -217,4 +328,10 @@ function toFtsQuery(query: string): string | null {
   }
 
   return tokens.map((token) => `${token.replace(/"/g, '""')}*`).join(' ');
+}
+
+function toFtsAnyQuery(query: string): string | null {
+  const tokens = query.match(/[\p{L}\p{N}_]+/gu);
+  if (!tokens?.length) return null;
+  return [...new Set(tokens)].map((token) => `${token.replace(/"/g, '""')}*`).join(' OR ');
 }

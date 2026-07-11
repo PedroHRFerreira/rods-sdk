@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "project": "{{projectName}}",
   "source": ".ai",
   "execution": {
@@ -10,17 +10,29 @@
     "enabled": true,
     "policyPath": ".ai/policies/complexity.md",
     "specsDir": "docs/rods/specs",
-    "modelAdviceOnly": true
+    "mode": "advisory"
   },
   "defaultTarget": "codex",
   "targets": {
     "codex": {
       "enabled": true,
-      "hooks": true
+      "hooks": true,
+      "execution": {
+        "binary": "codex",
+        "models": { "simple": "", "medium": "", "high": "" },
+        "args": [],
+        "timeoutMs": 900000
+      }
     },
     "claude": {
       "enabled": false,
-      "hooks": true
+      "hooks": true,
+      "execution": {
+        "binary": "claude",
+        "models": { "simple": "", "medium": "", "high": "" },
+        "args": [],
+        "timeoutMs": 900000
+      }
     }
   },
   "adapters": {
@@ -34,6 +46,10 @@
       "enabled": false,
       "mode": "opt-in"
     }
+  },
+  "workflow": {
+    "mode": "codex",
+    "maxIterations": 3
   },
   "generatedTemplates": {}
 }

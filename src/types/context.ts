@@ -87,3 +87,35 @@ export interface IIngestSummary {
   chunks: number;
   errors: string[];
 }
+
+export interface IQaEntry {
+  id: number;
+  answerId: number;
+  projectId: number;
+  rawQuestion: string;
+  normalizedQuestion: string;
+  questionHash: string;
+  policy: TQaPolicy;
+  fingerprint: string;
+  hitCount: number;
+  createdAt: string;
+  lastUsedAt: string;
+  summary: string;
+  fullAnswer: string | null;
+  sourceTokens: number | null;
+  files: IQaFile[];
+}
+
+export type TQaPolicy = 'conceptual' | 'files' | 'repository';
+
+export interface IQaFile {
+  filePath: string;
+  fileHash: string;
+}
+
+export interface IQaSearchResult {
+  status: 'hit' | 'stale' | 'miss';
+  match: 'exact' | 'lexical' | null;
+  confidence: number;
+  entry: IQaEntry | null;
+}

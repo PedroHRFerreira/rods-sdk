@@ -11,6 +11,13 @@ export const ADAPTER_TARGET_IDS = ['codex', 'claude'] as const;
 export type AdapterName = (typeof ADAPTER_NAMES)[number];
 export type AdapterTarget = (typeof ADAPTER_TARGET_IDS)[number];
 
+export interface IAgentExecutionConfig {
+  binary: string;
+  models: Record<'simple' | 'medium' | 'high', string>;
+  args: string[];
+  timeoutMs: number;
+}
+
 export interface IAdapterState {
   enabled: boolean;
   mode?: string;
@@ -25,14 +32,15 @@ export interface IGovernanceConfig {
     apiEnabled: false;
   };
   defaultTarget: AdapterTarget;
-  targets: Record<AdapterTarget, { enabled: boolean; skillsDir?: string; hooks?: boolean }>;
+  targets: Record<AdapterTarget, { enabled: boolean; skillsDir?: string; hooks?: boolean; execution?: IAgentExecutionConfig }>;
   adapters: Record<AdapterName, IAdapterState>;
   escalation?: {
     enabled: boolean;
     policyPath: string;
     specsDir: string;
-    modelAdviceOnly: boolean;
+    mode: 'advisory' | 'execute';
   };
+  workflow?: { mode: 'codex' | 'claude' | 'codex+claude' | 'claude+codex'; maxIterations: number };
   generatedTemplates?: Record<string, string>;
   generatedScripts?: Record<string, string>;
 }
@@ -383,22 +391,23 @@ export async function loadGovernanceConfig(root: string): Promise<IGovernanceCon
   return {
     ...defaults,
     ...parsed,
-    version: Math.max(parsed.version ?? 1, 2),
+    version: Math.max(parsed.version ?? 1, 3),
     escalation: {
       enabled: parsed.escalation?.enabled ?? defaults.escalation?.enabled ?? true,
       policyPath: parsed.escalation?.policyPath ?? defaults.escalation?.policyPath ?? '.ai/policies/complexity.md',
       specsDir: parsed.escalation?.specsDir ?? defaults.escalation?.specsDir ?? 'docs/rods/specs',
-      modelAdviceOnly: parsed.escalation?.modelAdviceOnly ?? defaults.escalation?.modelAdviceOnly ?? true
+      mode: parsed.escalation?.mode ?? ((parsed.escalation as { modelAdviceOnly?: boolean } | undefined)?.modelAdviceOnly === false ? 'execute' : 'advisory')
     },
     targets: {
       ...defaults.targets,
-      codex: { ...defaults.targets.codex, ...(parsed.targets?.codex ?? {}) },
-      claude: { ...defaults.targets.claude, ...(parsed.targets?.claude ?? {}) }
+      codex: { ...defaults.targets.codex, ...(parsed.targets?.codex ?? {}), execution: { ...defaults.targets.codex.execution!, ...(parsed.targets?.codex?.execution ?? {}), models: { ...defaults.targets.codex.execution!.models, ...(parsed.targets?.codex?.execution?.models ?? {}) } } },
+      claude: { ...defaults.targets.claude, ...(parsed.targets?.claude ?? {}), execution: { ...defaults.targets.claude.execution!, ...(parsed.targets?.claude?.execution ?? {}), models: { ...defaults.targets.claude.execution!.models, ...(parsed.targets?.claude?.execution?.models ?? {}) } } }
     },
     adapters: {
       ...defaults.adapters,
       ...(parsed.adapters ?? {})
-    }
+    },
+    workflow: { ...defaults.workflow!, ...(parsed.workflow ?? {}) }
   };
 }
 
@@ -411,7 +420,7 @@ async function saveGovernanceConfig(root: string, config: IGovernanceConfig): Pr
 
 function createDefaultConfig(root: string): IGovernanceConfig {
   return {
-    version: 2,
+    version: 3,
     project: path.basename(root),
     source: '.ai',
     execution: {
@@ -420,8 +429,8 @@ function createDefaultConfig(root: string): IGovernanceConfig {
     },
     defaultTarget: 'codex',
     targets: {
-      codex: { enabled: true, hooks: true },
-      claude: { enabled: false, hooks: true }
+      codex: { enabled: true, hooks: true, execution: { binary: 'codex', models: { simple: '', medium: '', high: '' }, args: [], timeoutMs: 900000 } },
+      claude: { enabled: false, hooks: true, execution: { binary: 'claude', models: { simple: '', medium: '', high: '' }, args: [], timeoutMs: 900000 } }
     },
     adapters: {
       rtk: { enabled: true },
@@ -432,8 +441,9 @@ function createDefaultConfig(root: string): IGovernanceConfig {
       enabled: true,
       policyPath: '.ai/policies/complexity.md',
       specsDir: 'docs/rods/specs',
-      modelAdviceOnly: true
-    }
+      mode: 'advisory'
+    },
+    workflow: { mode: 'codex', maxIterations: 3 }
   };
 }
 
