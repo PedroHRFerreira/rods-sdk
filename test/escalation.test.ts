@@ -27,6 +27,48 @@ test('classifyTask applies simple, medium, and high golden cases', async () => {
   assert.equal(createModelAdvice(high).changesConfiguration, false);
 });
 
+test('pre-execution classification ignores file signals without forcing human review', async () => {
+  const root = await policyRoot();
+  const policy = await loadComplexityPolicy(root);
+  const unrelatedFiles = ['src/a.ts', 'src/b.ts', 'backend/c.ts'];
+  const preExecution = classifyTask({ task: 'ajuste pontual', root, files: unrelatedFiles, policy, preExecution: true });
+  assert.equal(preExecution.level, 'simple');
+  assert.equal(preExecution.needsHumanReview, false);
+  assert.equal(preExecution.estimatedFiles, 0);
+
+  const standalone = classifyTask({ task: 'ajuste pontual', root, files: unrelatedFiles, policy });
+  assert.equal(standalone.level, 'medium');
+  assert.equal(standalone.estimatedFiles, 3);
+});
+
+test('pre-execution classification never reads an unrelated repository diff', async () => {
+  const root = await policyRoot();
+  const policy = await loadComplexityPolicy(root);
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'rods-fake-git-'));
+  const calls = path.join(bin, 'calls');
+  const git = path.join(bin, 'git');
+  await fs.writeFile(git, `#!/bin/sh\nprintf '%s\\n' "$PWD" >> ${JSON.stringify(calls)}\nprintf '%s\\n' src/a.ts src/b.ts backend/c.ts\n`);
+  await fs.chmod(git, 0o755);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath ?? ''}`;
+  try {
+    assert.equal(classifyTask({ task: 'ajuste pontual', root, policy, preExecution: true }).level, 'simple');
+    await assert.rejects(() => fs.readFile(calls, 'utf8'), /ENOENT/);
+    assert.equal(classifyTask({ task: 'ajuste pontual', root, policy }).level, 'medium');
+    assert.equal((await fs.readFile(calls, 'utf8')).trim(), root);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+
+test('pre-execution classification keeps textual epic and dependency signals', async () => {
+  const root = await policyRoot();
+  const policy = await loadComplexityPolicy(root);
+  assert.equal(classifyTask({ task: 'implementar um sistema de checkout', root, policy, preExecution: true }).level, 'high');
+  assert.equal(classifyTask({ task: 'executar npm install para nova dependência', root, policy, preExecution: true }).level, 'medium');
+});
+
 test('invalid complexity policy fails clearly', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'rods-invalid-policy-'));
   await fs.mkdir(path.join(root, '.ai', 'policies'), { recursive: true });

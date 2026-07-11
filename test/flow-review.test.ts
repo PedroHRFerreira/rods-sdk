@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { test } from 'node:test';
 import { ContextDatabase, type IFlowFinding } from '../src/database/database.js';
+import { buildDeveloperPrompt } from '../src/commands/flow.js';
 import { enforceApproval } from '../src/services/agent-runner.js';
 import { getDefaultConfig } from '../src/services/config.js';
 import { persistFindings, recurringFindings, recurringForFiles, reviewContextSnippets, runTestGate, sanitizeTestOutput, selectReviewDiff } from '../src/services/flow-review.js';
@@ -15,6 +17,33 @@ test('approval enforcement reconciles claimed approval with blocking severities'
   const medium = { approved: true, summary: 'claimed', findings: [{ severity: 'medium' as const, message: 'risky' }] };
   assert.equal(enforceApproval(medium, 'high').approved, true);
   assert.equal(enforceApproval(medium, 'medium').approved, false);
+});
+
+test('developer correction prompt reuses recurring patterns while initial prompt does not', () => {
+  const recurring = { patterns: [{ file: 'src/a.ts', severity: 'high' as const, message: 'handle async failures', count: 2 }], findingsConsulted: 2, comparisons: 4 };
+  const review = { approved: false, summary: 'fix it', findings: [{ file: 'src/a.ts', severity: 'high' as const, message: 'handle async failures' }] };
+  assert.doesNotMatch(buildDeveloperPrompt('adjust flow'), /knownPatterns/);
+  const correction = buildDeveloperPrompt('adjust flow', review, recurring, 'diff content');
+  assert.match(correction, /knownPatterns/);
+  assert.match(correction, /handle async failures/);
+  assert.match(correction, /diff content/);
+});
+
+test('finishing a flow run persists its final classification tier', async () => {
+  const storage = await fs.mkdtemp(path.join(os.tmpdir(), 'rods-flow-tier-'));
+  const databasePath = path.join(storage, 'db.sqlite');
+  const db = new ContextDatabase({ ...getDefaultConfig(), database: databasePath });
+  try {
+    const project = db.upsertProject('project', storage);
+    db.createFlowRun({ id: 'run-tier', projectId: project.id, task: 'task', mode: 'codex', tier: 'simple', status: 'running' });
+    db.finishFlowRun('run-tier', { status: 'approved', tier: 'high', iterations: 1 });
+  } finally { db.close(); }
+
+  const reader = new Database(databasePath, { readonly: true });
+  try {
+    const run = reader.prepare('SELECT tier, status FROM flow_runs WHERE id = ?').get('run-tier') as { tier: string; status: string };
+    assert.deepEqual(run, { tier: 'high', status: 'approved' });
+  } finally { reader.close(); }
 });
 
 test('test gate skips when absent, passes commands, and creates a bounded synthetic finding on failure', async () => {

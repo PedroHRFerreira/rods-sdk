@@ -22,6 +22,7 @@ export interface IClassificationInput {
   files?: string[];
   root?: string;
   policy?: IComplexityPolicy;
+  preExecution?: boolean;
 }
 
 export interface IClassificationResult {

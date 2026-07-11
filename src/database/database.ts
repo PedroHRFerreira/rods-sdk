@@ -239,8 +239,8 @@ export class ContextDatabase {
     return (file === undefined ? this.db.prepare('SELECT * FROM flow_findings WHERE projectId = ? ORDER BY createdAt DESC, id DESC').all(projectId) : this.db.prepare('SELECT * FROM flow_findings WHERE projectId = ? AND file = ? ORDER BY createdAt DESC, id DESC').all(projectId, file)) as IFlowFinding[];
   }
 
-  finishFlowRun(id: string, input: { status: string; patchPath?: string; iterations: number; error?: string }): void {
-    this.db.prepare('UPDATE flow_runs SET status = ?, patchPath = ?, iterations = ?, error = ?, finishedAt = ? WHERE id = ?').run(input.status, input.patchPath ?? null, input.iterations, input.error ?? null, new Date().toISOString(), id);
+  finishFlowRun(id: string, input: { status: string; tier: string; patchPath?: string; iterations: number; error?: string }): void {
+    this.db.prepare('UPDATE flow_runs SET status = ?, tier = ?, patchPath = ?, iterations = ?, error = ?, finishedAt = ? WHERE id = ?').run(input.status, input.tier, input.patchPath ?? null, input.iterations, input.error ?? null, new Date().toISOString(), id);
   }
 
   replaceChunksForPath(filePath: string, chunks: IChunkInput[]): number {

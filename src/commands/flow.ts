@@ -17,7 +17,8 @@ import {
   recurringFindings,
   recurringForFiles,
   reviewContextSnippets,
-  runTestGate
+  runTestGate,
+  type IRecurringFindingResult
 } from '../services/flow-review.js';
 
 type FlowMode = 'codex' | 'claude' | 'codex+claude' | 'claude+codex';
@@ -26,6 +27,11 @@ function agents(mode: FlowMode): [AdapterTarget, AdapterTarget] { const parts = 
 function execution(config: IGovernanceConfig, agent: AdapterTarget) { const value = config.targets[agent].execution; if (!value) throw new Error(`Execution is not configured for ${agent}`); return value; }
 function compactTask(task: string): string { return task.trim().replace(/\s+/g, ' ').slice(0, 4000); }
 function posix(value: string): string { return value.split(path.sep).join('/').replace(/^\.\//, ''); }
+
+export function buildDeveloperPrompt(task: string, review?: ReviewResult, recurring?: IRecurringFindingResult, correctionDiff?: string): string {
+  if (!review) return `Implement this task in the current worktree. Run relevant tests and leave all changes in the worktree. Task: ${compactTask(task)}`;
+  return `Correct only the outstanding review findings for this task. Do not restart the implementation. Task: ${compactTask(task)}\nFindings: ${JSON.stringify(review.findings)}\n${formatRecurringPatterns(recurring?.patterns ?? [])}\nCurrent diff:\n${correctionDiff ?? ''}`;
+}
 
 export function registerFlowCommand(program: Command): void {
   const flow = program.command('flow').description('Run an isolated CLI-first agent workflow');
@@ -54,7 +60,7 @@ export function registerFlowCommand(program: Command): void {
     if (!['codex','claude','codex+claude','claude+codex'].includes(mode)) throw new Error(`Invalid flow mode: ${mode}`);
     if (!config.escalation?.enabled || config.escalation.mode !== 'execute') throw new Error('Enable escalation and set escalation.mode to "execute" before running agents');
     git(root, ['rev-parse','--show-toplevel']);
-    const policy = await loadComplexityPolicy(root); const classification = classifyTask({ task, root, policy });
+    const policy = await loadComplexityPolicy(root); let classification = classifyTask({ task, root, policy, preExecution: true });
     const [developer, reviewer] = agents(mode); const maxIterations = config.workflow?.maxIterations ?? 3; const failOnSeverity = config.workflow?.failOnSeverity ?? 'high';
     if (!Number.isSafeInteger(maxIterations) || maxIterations < 1) throw new Error('workflow.maxIterations must be >= 1');
     if (failOnSeverity !== 'high' && failOnSeverity !== 'medium') throw new Error('workflow.failOnSeverity must be high or medium');
@@ -65,6 +71,7 @@ export function registerFlowCommand(program: Command): void {
     let status = 'failed', iterations = 0, review: ReviewResult | undefined, error: string | undefined;
     const usage: Array<{ phase: string; agent: AdapterTarget; inputTokens: number | null; outputTokens: number | null; durationMs: number }> = [];
     const omittedFiles = new Set<string>(); let reviewsExecuted = 0, reviewsAvoidedByGate = 0, snippetsUsed = 0, findingsConsulted = 0, findingComparisons = 0;
+    let recurring: IRecurringFindingResult | undefined;
     const recordFailure = (phase: string, agent: AdapterTarget, cause: unknown, started: number) => db.addFlowStep({ runId: id, phase, agent, model: execution(config, agent).models[classification.level], status: 'failed', durationMs: Date.now() - started, error: cause instanceof Error ? cause.message : String(cause) });
     try {
       for (iterations = 1; iterations <= maxIterations; iterations++) {
@@ -72,16 +79,17 @@ export function registerFlowCommand(program: Command): void {
         try {
           const priorityFiles = review?.findings.flatMap((finding) => finding.file ? [finding.file] : []) ?? [];
           const correctionDiff = iterations === 1 ? undefined : buildReviewDiff(worktree, { priorityFiles });
-          const prompt = iterations === 1
-            ? `Implement this task in the current worktree. Run relevant tests and leave all changes in the worktree. Task: ${compactTask(task)}`
-            : `Correct only the outstanding review findings for this task. Do not restart the implementation. Task: ${compactTask(task)}\nFindings: ${JSON.stringify(review?.findings ?? [])}\nCurrent diff:\n${correctionDiff?.content ?? ''}`;
-          const result = await runAgent({ agent: developer, config: execution(config, developer), tier: classification.level, cwd: worktree, prompt });
+          const phaseTier = classification.level;
+          const prompt = buildDeveloperPrompt(task, iterations === 1 ? undefined : review, recurring, correctionDiff?.content);
+          const result = await runAgent({ agent: developer, config: execution(config, developer), tier: phaseTier, cwd: worktree, prompt });
           usage.push({ phase, agent: developer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, durationMs: result.durationMs });
-          db.addFlowStep({ runId: id, phase, agent: developer, model: execution(config, developer).models[classification.level], status: 'completed', durationMs: result.durationMs, inputTokens: result.inputTokens, outputTokens: result.outputTokens, exitCode: result.exitCode, summary: result.output.slice(0, 2000) });
+          db.addFlowStep({ runId: id, phase, agent: developer, model: execution(config, developer).models[phaseTier], status: 'completed', durationMs: result.durationMs, inputTokens: result.inputTokens, outputTokens: result.outputTokens, exitCode: result.exitCode, summary: result.output.slice(0, 2000) });
         } catch (cause) { recordFailure(phase, developer, cause, started); throw cause; }
 
+        if (iterations === 1) classification = classifyTask({ task, root: worktree, policy });
+
         let bundle = buildReviewDiff(worktree);
-        const recurring = recurringForFiles(db, project.id, bundle.touchedFiles);
+        recurring = recurringForFiles(db, project.id, bundle.touchedFiles);
         bundle = buildReviewDiff(worktree, { recurringFiles: recurring.patterns.map((pattern) => pattern.file) });
         for (const file of bundle.omittedFiles) omittedFiles.add(file);
         findingsConsulted += recurring.findingsConsulted; findingComparisons += recurring.comparisons;
@@ -112,14 +120,14 @@ export function registerFlowCommand(program: Command): void {
       }
       if (status !== 'approved') status = 'max_iterations';
       git(worktree, ['add','-A']); const patch = git(worktree, ['diff','--cached','--binary','HEAD']); await fs.writeFile(patchPath, patch);
-      db.finishFlowRun(id, { status, patchPath, iterations: Math.min(iterations, maxIterations) });
+      db.finishFlowRun(id, { status, tier: classification.level, patchPath, iterations: Math.min(iterations, maxIterations) });
       const knownInputTokens = usage.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0); const knownOutputTokens = usage.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0); const unavailableSteps = usage.filter((item) => item.inputTokens === null || item.outputTokens === null).length;
       const reviewMetrics = { reviewsExecuted, reviewsAvoidedByGate, omittedFiles: [...omittedFiles], snippetsUsed, findingsConsulted, findingComparisons };
       const output = { id, status, tier: classification.level, mode, iterations: Math.min(iterations, maxIterations), worktree, branch, patchPath, review, usage, reviewMetrics, totals: { knownInputTokens, knownOutputTokens, unavailableSteps } };
       if (options.json) console.log(JSON.stringify(output)); else { console.log(`run=${id} status=${status} tier=${classification.level} iterations=${output.iterations}`); for (const item of usage) console.log(`step=${item.phase} agent=${item.agent} inputTokens=${item.inputTokens ?? 'unavailable'} outputTokens=${item.outputTokens ?? 'unavailable'} durationMs=${item.durationMs}`); console.log(`reviewsExecuted=${reviewsExecuted} reviewsAvoidedByGate=${reviewsAvoidedByGate} snippetsUsed=${snippetsUsed} findingsConsulted=${findingsConsulted} findingComparisons=${findingComparisons}`); console.log(`knownInputTokens=${knownInputTokens} knownOutputTokens=${knownOutputTokens} unavailableSteps=${unavailableSteps}`); console.log(`worktree=${worktree}`); console.log(`patch=${patchPath}`); console.log(`apply=git apply ${JSON.stringify(patchPath)}`); if (review && !review.approved) for (const finding of review.findings) console.log(`finding=${finding.severity}:${finding.message}`); }
       if (status !== 'approved') process.exitCode = 2;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause); db.finishFlowRun(id, { status: 'failed', iterations: Math.min(iterations, maxIterations), error }); throw cause;
+      error = cause instanceof Error ? cause.message : String(cause); db.finishFlowRun(id, { status: 'failed', tier: classification.level, iterations: Math.min(iterations, maxIterations), error }); throw cause;
     } finally { db.close(); }
   });
 }

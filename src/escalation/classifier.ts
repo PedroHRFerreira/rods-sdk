@@ -31,7 +31,9 @@ function maxLevel(left: ComplexityLevel, right: ComplexityLevel): ComplexityLeve
 export function classifyTask(input: IClassificationInput): IClassificationResult {
   const policy = input.policy ?? DEFAULT_COMPLEXITY_POLICY;
   const root = input.root ?? process.cwd();
-  const files = [...new Set((input.files?.length ? input.files : gitFiles(root)).filter(Boolean))];
+  const files = input.preExecution
+    ? []
+    : [...new Set((input.files?.length ? input.files : gitFiles(root)).filter(Boolean))];
   const task = input.task.trim();
   const lower = task.toLocaleLowerCase();
   const layers = layersFor(files, policy);
@@ -58,7 +60,7 @@ export function classifyTask(input: IClassificationInput): IClassificationResult
     level = 'high';
     reasons.push('gatilho Epic encontrado na demanda');
   }
-  const needsHumanReview = !task || (files.length === 0 && !epic && !dependencyNew);
+  const needsHumanReview = !task || (!input.preExecution && files.length === 0 && !epic && !dependencyNew);
   if (needsHumanReview) {
     level = maxLevel(level, 'medium');
     reasons.push('faltam sinais suficientes para confiança alta');
