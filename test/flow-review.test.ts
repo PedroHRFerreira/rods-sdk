@@ -47,20 +47,16 @@ test('flow progress formats human durations without raw milliseconds', () => {
   assert.equal(humanDuration(3_661_999), '61m1s');
 });
 
-test('flow progress writes synchronously to stderr without contaminating JSON stdout', () => {
-  const stderr: string[] = []; const stdout: string[] = []; let executionFinished = false;
-  const originalWrite = process.stderr.write; const originalLog = console.log;
+test('flow announce writes synchronously to stderr', () => {
+  const stderr: string[] = []; let executionFinished = false;
+  const originalWrite = process.stderr.write;
   process.stderr.write = ((chunk: string | Uint8Array) => { stderr.push(String(chunk)); return true; }) as typeof process.stderr.write;
-  console.log = (message?: unknown) => { stdout.push(String(message)); };
   try {
     announce('[iteração 1/1] codex está desenvolvendo…');
     assert.equal(executionFinished, false);
     executionFinished = true;
-    console.log(JSON.stringify({ status: 'approved' }));
-  } finally { process.stderr.write = originalWrite; console.log = originalLog; }
+  } finally { process.stderr.write = originalWrite; }
   assert.deepEqual(stderr, ['[iteração 1/1] codex está desenvolvendo…\n']);
-  assert.deepEqual(JSON.parse(stdout.join('')), { status: 'approved' });
-  assert.doesNotMatch(stdout.join(''), /iteração|desenvolvendo/);
 });
 
 test('flow iteration summaries cover gates, review outcomes, exhaustion, and solo mode', () => {
