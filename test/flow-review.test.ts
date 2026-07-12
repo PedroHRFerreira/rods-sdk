@@ -5,7 +5,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { test } from 'node:test';
 import { ContextDatabase, type IFlowFinding } from '../src/database/database.js';
-import { buildDeveloperPrompt } from '../src/commands/flow.js';
+import { buildDeveloperPrompt, isValidFlowMode, validFlowModes } from '../src/commands/flow.js';
 import { enforceApproval } from '../src/services/agent-runner.js';
 import { getDefaultConfig } from '../src/services/config.js';
 import { persistFindings, recurringFindings, recurringForFiles, reviewContextSnippets, runTestGate, sanitizeTestOutput, selectReviewDiff } from '../src/services/flow-review.js';
@@ -27,6 +27,17 @@ test('developer correction prompt reuses recurring patterns while initial prompt
   assert.match(correction, /knownPatterns/);
   assert.match(correction, /handle async failures/);
   assert.match(correction, /diff content/);
+});
+
+test('flow modes include every solo agent and ordered distinct pair', () => {
+  assert.deepEqual(validFlowModes(), [
+    'codex', 'claude', 'gemini',
+    'codex+claude', 'codex+gemini',
+    'claude+codex', 'claude+gemini',
+    'gemini+codex', 'gemini+claude'
+  ]);
+  for (const mode of validFlowModes()) assert.equal(isValidFlowMode(mode), true);
+  for (const mode of ['gemini+gemini', 'unknown', 'codex+claude+gemini', 'codex++gemini']) assert.equal(isValidFlowMode(mode), false);
 });
 
 test('finishing a flow run persists its final classification tier', async () => {

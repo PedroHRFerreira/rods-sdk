@@ -33,6 +33,15 @@
         "args": [],
         "timeoutMs": 900000
       }
+    },
+    "gemini": {
+      "enabled": false,
+      "execution": {
+        "binary": "gemini",
+        "models": { "simple": "", "medium": "", "high": "" },
+        "args": [],
+        "timeoutMs": 900000
+      }
     }
   },
   "adapters": {

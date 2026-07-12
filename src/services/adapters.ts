@@ -7,9 +7,11 @@ import { copyFileIfAllowed, pathExists, writeTemplateFile, type IFileWriteResult
 
 export const ADAPTER_NAMES = ['rtk', 'claude-mem', 'caveman'] as const;
 export const ADAPTER_TARGET_IDS = ['codex', 'claude'] as const;
+export const AGENT_TARGET_IDS = ['codex', 'claude', 'gemini'] as const;
 
 export type AdapterName = (typeof ADAPTER_NAMES)[number];
 export type AdapterTarget = (typeof ADAPTER_TARGET_IDS)[number];
+export type AgentTarget = (typeof AGENT_TARGET_IDS)[number];
 
 export interface IAgentExecutionConfig {
   binary: string;
@@ -38,7 +40,7 @@ export interface IGovernanceConfig {
     apiEnabled: false;
   };
   defaultTarget: AdapterTarget;
-  targets: Record<AdapterTarget, { enabled: boolean; skillsDir?: string; hooks?: boolean; execution?: IAgentExecutionConfig }>;
+  targets: Record<AgentTarget, { enabled: boolean; skillsDir?: string; hooks?: boolean; execution?: IAgentExecutionConfig }>;
   adapters: Record<AdapterName, IAdapterState>;
   escalation?: {
     enabled: boolean;
@@ -47,7 +49,7 @@ export interface IGovernanceConfig {
     mode: 'advisory' | 'execute';
   };
   workflow?: {
-    mode: 'codex' | 'claude' | 'codex+claude' | 'claude+codex';
+    mode: string;
     maxIterations: number;
     failOnSeverity: 'high' | 'medium';
     testCommand?: IWorkflowTestCommand;
@@ -199,6 +201,10 @@ export function listAdapterTargets(): IAdapterTargetDefinition[] {
 
 export function isAdapterTarget(input: string): input is AdapterTarget {
   return (ADAPTER_TARGET_IDS as readonly string[]).includes(input);
+}
+
+export function isAgentTarget(input: string): input is AgentTarget {
+  return (AGENT_TARGET_IDS as readonly string[]).includes(input);
 }
 
 export function isAdapterName(input: string): input is AdapterName {
@@ -410,17 +416,32 @@ export async function loadGovernanceConfig(root: string): Promise<IGovernanceCon
       specsDir: parsed.escalation?.specsDir ?? defaults.escalation?.specsDir ?? 'docs/rods/specs',
       mode: parsed.escalation?.mode ?? ((parsed.escalation as { modelAdviceOnly?: boolean } | undefined)?.modelAdviceOnly === false ? 'execute' : 'advisory')
     },
-    targets: {
-      ...defaults.targets,
-      codex: { ...defaults.targets.codex, ...(parsed.targets?.codex ?? {}), execution: { ...defaults.targets.codex.execution!, ...(parsed.targets?.codex?.execution ?? {}), models: { ...defaults.targets.codex.execution!.models, ...(parsed.targets?.codex?.execution?.models ?? {}) } } },
-      claude: { ...defaults.targets.claude, ...(parsed.targets?.claude ?? {}), execution: { ...defaults.targets.claude.execution!, ...(parsed.targets?.claude?.execution ?? {}), models: { ...defaults.targets.claude.execution!.models, ...(parsed.targets?.claude?.execution?.models ?? {}) } } }
-    },
+    targets: mergeAgentTargets(defaults.targets, parsed.targets),
     adapters: {
       ...defaults.adapters,
       ...(parsed.adapters ?? {})
     },
     workflow: { ...defaults.workflow!, ...(parsed.workflow ?? {}) }
   };
+}
+
+function mergeAgentTargets(
+  defaults: IGovernanceConfig['targets'],
+  parsed: Partial<IGovernanceConfig>['targets']
+): IGovernanceConfig['targets'] {
+  return Object.fromEntries(AGENT_TARGET_IDS.map((target) => {
+    const configured = parsed?.[target];
+    const defaultExecution = defaults[target].execution!;
+    return [target, {
+      ...defaults[target],
+      ...(configured ?? {}),
+      execution: {
+        ...defaultExecution,
+        ...(configured?.execution ?? {}),
+        models: { ...defaultExecution.models, ...(configured?.execution?.models ?? {}) }
+      }
+    }];
+  })) as IGovernanceConfig['targets'];
 }
 
 async function saveGovernanceConfig(root: string, config: IGovernanceConfig): Promise<string> {
@@ -442,7 +463,8 @@ function createDefaultConfig(root: string): IGovernanceConfig {
     defaultTarget: 'codex',
     targets: {
       codex: { enabled: true, hooks: true, execution: { binary: 'codex', models: { simple: '', medium: '', high: '' }, args: [], timeoutMs: 900000 } },
-      claude: { enabled: false, hooks: true, execution: { binary: 'claude', models: { simple: '', medium: '', high: '' }, args: [], timeoutMs: 900000 } }
+      claude: { enabled: false, hooks: true, execution: { binary: 'claude', models: { simple: '', medium: '', high: '' }, args: [], timeoutMs: 900000 } },
+      gemini: { enabled: false, execution: { binary: 'gemini', models: { simple: '', medium: '', high: '' }, args: [], timeoutMs: 900000 } }
     },
     adapters: {
       rtk: { enabled: true },

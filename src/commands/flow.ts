@@ -7,7 +7,7 @@ import type { Command } from 'commander';
 import { ContextDatabase } from '../database/database.js';
 import { classifyTask, loadComplexityPolicy } from '../escalation/index.js';
 import { runAgent, type ReviewResult } from '../services/agent-runner.js';
-import { loadGovernanceConfig, type AdapterTarget, type IGovernanceConfig } from '../services/adapters.js';
+import { AGENT_TARGET_IDS, loadGovernanceConfig, type AgentTarget, type IGovernanceConfig } from '../services/adapters.js';
 import { loadConfig } from '../services/config.js';
 import {
   buildReviewDiff,
@@ -21,12 +21,24 @@ import {
   type IRecurringFindingResult
 } from '../services/flow-review.js';
 
-type FlowMode = 'codex' | 'claude' | 'codex+claude' | 'claude+codex';
+type FlowMode = string;
 function git(root: string, args: string[]): string { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','pipe'] }); }
-function agents(mode: FlowMode): [AdapterTarget, AdapterTarget] { const parts = mode.split('+') as AdapterTarget[]; return [parts[0], parts[1] ?? parts[0]]; }
-function execution(config: IGovernanceConfig, agent: AdapterTarget) { const value = config.targets[agent].execution; if (!value) throw new Error(`Execution is not configured for ${agent}`); return value; }
+function agents(mode: FlowMode): [AgentTarget, AgentTarget] { const parts = mode.split('+') as AgentTarget[]; return [parts[0], parts[1] ?? parts[0]]; }
+function execution(config: IGovernanceConfig, agent: AgentTarget) { const value = config.targets[agent].execution; if (!value) throw new Error(`Execution is not configured for ${agent}`); return value; }
 function compactTask(task: string): string { return task.trim().replace(/\s+/g, ' ').slice(0, 4000); }
 function posix(value: string): string { return value.split(path.sep).join('/').replace(/^\.\//, ''); }
+
+export function validFlowModes(): string[] {
+  const solo = [...AGENT_TARGET_IDS];
+  const pairs = AGENT_TARGET_IDS.flatMap((developer) => AGENT_TARGET_IDS
+    .filter((reviewer) => reviewer !== developer)
+    .map((reviewer) => `${developer}+${reviewer}`));
+  return [...solo, ...pairs];
+}
+
+export function isValidFlowMode(mode: string): boolean {
+  return validFlowModes().includes(mode);
+}
 
 export function buildDeveloperPrompt(task: string, review?: ReviewResult, recurring?: IRecurringFindingResult, correctionDiff?: string): string {
   if (!review) return `Implement this task in the current worktree. Run relevant tests and leave all changes in the worktree. Task: ${compactTask(task)}`;
@@ -57,7 +69,7 @@ export function registerFlowCommand(program: Command): void {
 
   flow.command('run').argument('<task>').option('--mode <mode>').option('--root <path>', 'project root', '.').option('--json').action(async (task: string, options: { mode?: FlowMode; root: string; json?: boolean }) => {
     const root = path.resolve(options.root); const config = await loadGovernanceConfig(root); const mode = options.mode ?? config.workflow?.mode ?? 'codex';
-    if (!['codex','claude','codex+claude','claude+codex'].includes(mode)) throw new Error(`Invalid flow mode: ${mode}`);
+    if (!isValidFlowMode(mode)) throw new Error(`Invalid flow mode: ${mode}`);
     if (!config.escalation?.enabled || config.escalation.mode !== 'execute') throw new Error('Enable escalation and set escalation.mode to "execute" before running agents');
     git(root, ['rev-parse','--show-toplevel']);
     const policy = await loadComplexityPolicy(root); let classification = classifyTask({ task, root, policy, preExecution: true });
@@ -69,10 +81,10 @@ export function registerFlowCommand(program: Command): void {
     const db = new ContextDatabase(loadConfig()); const project = db.findProjectForPath(root) ?? db.upsertProject(path.basename(root), root);
     db.createFlowRun({ id, projectId: project.id, task: compactTask(task), mode, tier: classification.level, status: 'running', worktreePath: worktree });
     let status = 'failed', iterations = 0, review: ReviewResult | undefined, error: string | undefined;
-    const usage: Array<{ phase: string; agent: AdapterTarget; inputTokens: number | null; outputTokens: number | null; durationMs: number }> = [];
+    const usage: Array<{ phase: string; agent: AgentTarget; inputTokens: number | null; outputTokens: number | null; durationMs: number }> = [];
     const omittedFiles = new Set<string>(); let reviewsExecuted = 0, reviewsAvoidedByGate = 0, snippetsUsed = 0, findingsConsulted = 0, findingComparisons = 0;
     let recurring: IRecurringFindingResult | undefined;
-    const recordFailure = (phase: string, agent: AdapterTarget, cause: unknown, started: number) => db.addFlowStep({ runId: id, phase, agent, model: execution(config, agent).models[classification.level], status: 'failed', durationMs: Date.now() - started, error: cause instanceof Error ? cause.message : String(cause) });
+    const recordFailure = (phase: string, agent: AgentTarget, cause: unknown, started: number) => db.addFlowStep({ runId: id, phase, agent, model: execution(config, agent).models[classification.level], status: 'failed', durationMs: Date.now() - started, error: cause instanceof Error ? cause.message : String(cause) });
     try {
       for (iterations = 1; iterations <= maxIterations; iterations++) {
         const phase = iterations === 1 ? 'develop' : 'patch'; const started = Date.now();

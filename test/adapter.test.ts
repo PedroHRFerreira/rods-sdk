@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { doctorAdapters, enableAdapter, listAdapters, listAdapterTargets, syncAdapters } from '../src/services/adapters.js';
+import { AGENT_TARGET_IDS, doctorAdapters, enableAdapter, listAdapters, listAdapterTargets, loadGovernanceConfig, syncAdapters } from '../src/services/adapters.js';
 import { initProject } from '../src/services/scaffold.js';
 
 test('adapter catalog excludes context-mode and keeps rtk as the default adapter', () => {
@@ -23,6 +23,24 @@ test('adapter catalog excludes context-mode and keeps rtk as the default adapter
   assert.ok(targets.every((target) => typeof target.projectionFn === 'function'));
   assert.ok(targets.every((target) => typeof target.syncFn === 'function'));
   assert.ok(targets.every((target) => typeof target.doctorFn === 'function'));
+  assert.deepEqual(AGENT_TARGET_IDS, ['codex', 'claude', 'gemini']);
+});
+
+test('governance config supplies and merges Gemini execution defaults without making it an adapter target', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-gemini-config-'));
+  await initProject(root);
+  const configPath = path.join(root, '.ai', 'config.json');
+  const raw = JSON.parse(await fs.readFile(configPath, 'utf8')) as { targets: { gemini: { execution: { models: Record<string, string>; timeoutMs: number } } } };
+  raw.targets.gemini.execution.models.medium = 'gemini-medium';
+  raw.targets.gemini.execution.timeoutMs = 120000;
+  await fs.writeFile(configPath, `${JSON.stringify(raw, null, 2)}\n`);
+
+  const config = await loadGovernanceConfig(root);
+  assert.equal(config.targets.gemini.execution?.binary, 'gemini');
+  assert.equal(config.targets.gemini.execution?.models.medium, 'gemini-medium');
+  assert.equal(config.targets.gemini.execution?.models.simple, '');
+  assert.equal(config.targets.gemini.execution?.timeoutMs, 120000);
+  assert.deepEqual(listAdapterTargets().map((target) => target.id), ['codex', 'claude']);
 });
 
 test('enableAdapter updates .ai/config.json and writes the adapter note', async () => {
