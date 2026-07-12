@@ -5,7 +5,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { test } from 'node:test';
 import { ContextDatabase, type IFlowFinding } from '../src/database/database.js';
-import { buildDeveloperPrompt, isValidFlowMode, preflightFlowExecution, validFlowModes } from '../src/commands/flow.js';
+import { announce, buildDeveloperPrompt, formatIterationSummary, humanDuration, isValidFlowMode, preflightFlowExecution, validFlowModes } from '../src/commands/flow.js';
 import { enforceApproval } from '../src/services/agent-runner.js';
 import { getDefaultConfig } from '../src/services/config.js';
 import { persistFindings, recurringFindings, recurringForFiles, reviewContextSnippets, runTestGate, sanitizeTestOutput, selectReviewDiff } from '../src/services/flow-review.js';
@@ -38,6 +38,37 @@ test('flow modes include every solo agent and ordered distinct pair', () => {
   ]);
   for (const mode of validFlowModes()) assert.equal(isValidFlowMode(mode), true);
   for (const mode of ['gemini+gemini', 'unknown', 'codex+claude+gemini', 'codex++gemini']) assert.equal(isValidFlowMode(mode), false);
+});
+
+test('flow progress formats human durations without raw milliseconds', () => {
+  assert.equal(humanDuration(999), '0m0s');
+  assert.equal(humanDuration(59_999), '0m59s');
+  assert.equal(humanDuration(215_143), '3m35s');
+  assert.equal(humanDuration(3_661_999), '61m1s');
+});
+
+test('flow progress writes synchronously to stderr without contaminating JSON stdout', () => {
+  const stderr: string[] = []; const stdout: string[] = []; let executionFinished = false;
+  const originalWrite = process.stderr.write; const originalLog = console.log;
+  process.stderr.write = ((chunk: string | Uint8Array) => { stderr.push(String(chunk)); return true; }) as typeof process.stderr.write;
+  console.log = (message?: unknown) => { stdout.push(String(message)); };
+  try {
+    announce('[iteração 1/1] codex está desenvolvendo…');
+    assert.equal(executionFinished, false);
+    executionFinished = true;
+    console.log(JSON.stringify({ status: 'approved' }));
+  } finally { process.stderr.write = originalWrite; console.log = originalLog; }
+  assert.deepEqual(stderr, ['[iteração 1/1] codex está desenvolvendo…\n']);
+  assert.deepEqual(JSON.parse(stdout.join('')), { status: 'approved' });
+  assert.doesNotMatch(stdout.join(''), /iteração|desenvolvendo/);
+});
+
+test('flow iteration summaries cover gates, review outcomes, exhaustion, and solo mode', () => {
+  assert.equal(formatIterationSummary({ iteration: 1, developer: 'codex', reviewer: 'gemini', first: true, outcome: 'gate_failed' }), '1: codex desenvolveu → gate de teste falhou → revisão pulada');
+  assert.equal(formatIterationSummary({ iteration: 2, developer: 'codex', reviewer: 'claude', first: false, outcome: 'changes_requested', findings: 2 }), '2: codex corrigiu → claude revisou → mudanças solicitadas (2 findings)');
+  assert.equal(formatIterationSummary({ iteration: 3, developer: 'codex', reviewer: 'claude', first: false, outcome: 'max_iterations', findings: 1 }), '3: codex corrigiu → claude revisou → limite atingido sem aprovação');
+  assert.equal(formatIterationSummary({ iteration: 1, developer: 'codex', reviewer: 'codex', first: true, outcome: 'approved' }), '1: codex desenvolveu → codex revisou → aprovado');
+  assert.match(formatIterationSummary({ iteration: 3, developer: 'gemini', reviewer: 'claude', first: false, outcome: 'gate_failed', exhausted: true }), /revisão pulada → limite atingido sem aprovação$/);
 });
 
 test('flow preflight validates both roles before execution', () => {

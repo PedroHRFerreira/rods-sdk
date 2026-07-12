@@ -23,7 +23,21 @@ import {
 } from '../services/flow-review.js';
 
 type FlowMode = string;
+type IterationOutcome = 'gate_failed' | 'changes_requested' | 'approved' | 'max_iterations';
 function git(root: string, args: string[]): string { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','pipe'] }); }
+export function announce(message: string): void { process.stderr.write(`${message}\n`); }
+export function humanDuration(ms: number): string { const seconds = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(seconds / 60)}m${seconds % 60}s`; }
+function highestSeverity(findings: ReviewResult['findings']): ReviewResult['findings'][number]['severity'] | undefined {
+  const rank = { low: 0, medium: 1, high: 2 } as const;
+  return findings.reduce<ReviewResult['findings'][number]['severity'] | undefined>((highest, finding) => !highest || rank[finding.severity] > rank[highest] ? finding.severity : highest, undefined);
+}
+export function formatIterationSummary(input: { iteration: number; developer: AgentTarget; reviewer: AgentTarget; first: boolean; outcome: IterationOutcome; findings?: number; exhausted?: boolean }): string {
+  const developed = `${input.developer} ${input.first ? 'desenvolveu' : 'corrigiu'}`;
+  if (input.outcome === 'gate_failed') return `${input.iteration}: ${developed} → gate de teste falhou → revisão pulada${input.exhausted ? ' → limite atingido sem aprovação' : ''}`;
+  if (input.outcome === 'approved') return `${input.iteration}: ${developed} → ${input.reviewer} revisou → aprovado`;
+  if (input.outcome === 'max_iterations') return `${input.iteration}: ${developed} → ${input.reviewer} revisou → limite atingido sem aprovação`;
+  return `${input.iteration}: ${developed} → ${input.reviewer} revisou → mudanças solicitadas (${input.findings ?? 0} findings)`;
+}
 export function promoteApprovedPatch(input: { root: string; patchPath: string; expectedBranch: string; expectedHead: string; hasChanges: boolean }): { branch: string; applied: boolean } {
   const branch = git(input.root, ['branch','--show-current']).trim();
   const head = git(input.root, ['rev-parse','HEAD']).trim();
@@ -104,18 +118,24 @@ export function registerFlowCommand(program: Command): void {
     db.createFlowRun({ id, projectId: project.id, task: compactTask(task), mode, tier: classification.level, status: 'running', worktreePath: worktree });
     let status = 'failed', iterations = 0, review: ReviewResult | undefined, error: string | undefined;
     const usage: Array<{ phase: string; agent: AgentTarget; inputTokens: number | null; outputTokens: number | null; durationMs: number }> = [];
+    const iterationSummaries: string[] = [];
     const omittedFiles = new Set<string>(); let reviewsExecuted = 0, reviewsAvoidedByGate = 0, snippetsUsed = 0, findingsConsulted = 0, findingComparisons = 0;
     let recurring: IRecurringFindingResult | undefined;
     const recordFailure = (phase: AgentPhase, agent: AgentTarget, cause: unknown, started: number) => db.addFlowStep({ runId: id, phase, agent, model: modelForRecord(config, agent, classification.level), status: 'failed', durationMs: Date.now() - started, error: cause instanceof Error ? cause.message : String(cause) });
     try {
       for (iterations = 1; iterations <= maxIterations; iterations++) {
         const phase = iterations === 1 ? 'develop' : 'patch'; const started = Date.now();
+        const iterationLabel = `[iteração ${iterations}/${maxIterations}]`;
+        announce(`${iterationLabel} ${developer} está ${iterations === 1 ? 'desenvolvendo' : 'corrigindo'}…`);
         try {
           const priorityFiles = review?.findings.flatMap((finding) => finding.file ? [finding.file] : []) ?? [];
           const correctionDiff = iterations === 1 ? undefined : buildReviewDiff(worktree, { priorityFiles });
           const phaseTier = classification.level;
           const prompt = buildDeveloperPrompt(task, iterations === 1 ? undefined : review, recurring, correctionDiff?.content);
           const result = await runAgent({ agent: developer, config: execution(config, developer), tier: phaseTier, cwd: worktree, prompt, phase });
+          const tokenDetail = result.inputTokens === null ? '' : `, ${result.inputTokens.toLocaleString('pt-BR')} tokens de entrada`;
+          const testDetail = config.workflow?.testCommand ? ' → rodando testes' : '';
+          announce(`${iterationLabel} ${developer} entregou (${humanDuration(result.durationMs)}${tokenDetail})${testDetail}`);
           usage.push({ phase, agent: developer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, durationMs: result.durationMs });
           db.addFlowStep({ runId: id, phase, agent: developer, model: execution(config, developer).models[phaseTier], status: 'completed', durationMs: result.durationMs, inputTokens: result.inputTokens, outputTokens: result.outputTokens, exitCode: result.exitCode, summary: result.output.slice(0, 2000) });
         } catch (cause) { recordFailure(phase, developer, cause, started); throw cause; }
@@ -132,27 +152,40 @@ export function registerFlowCommand(program: Command): void {
         db.addFlowStep({ runId: id, phase: 'test', agent: 'system', model: 'none', status: gate.status, durationMs: gate.durationMs, exitCode: gate.status === 'passed' ? 0 : gate.status === 'failed' ? 1 : null, summary: gate.output?.slice(-2000) });
 
         if (gate.status === 'failed') {
+          announce(`${iterationLabel} gate de teste falhou → revisão pulada`);
+          iterationSummaries.push(formatIterationSummary({ iteration: iterations, developer, reviewer, first: iterations === 1, outcome: 'gate_failed', exhausted: iterations === maxIterations }));
           review = { approved: false, summary: 'Automated test gate failed before LLM review.', findings: [gate.finding!] };
           persistFindings(db, { projectId: project.id, runId: id, findings: review.findings, root: worktree }); reviewsAvoidedByGate++;
           db.addFlowStep({ runId: id, phase: 'review', agent: 'system', model: 'none', status: 'changes_requested', durationMs: 0, approved: false, summary: JSON.stringify({ review, modelClaimedApproved: null, testGate: gate.status, diff: { includedFiles: bundle.includedFiles, omittedFiles: bundle.omittedFiles }, recurring, reviewContext: { enabled: false, snippets: 0 } }) });
           continue;
         }
+        if (gate.status === 'passed') announce(`${iterationLabel} testes passaram → enviando pra revisão`);
 
         let contextResults: ReturnType<typeof reviewContextSnippets> = []; let contextError: string | undefined;
         if (config.workflow?.reviewContext) { try { contextResults = reviewContextSnippets(db, project.id, bundle); } catch (cause) { contextError = cause instanceof Error ? cause.message : String(cause); } }
         snippetsUsed += contextResults.length;
         const reviewStarted = Date.now();
+        announce(`${iterationLabel} ${reviewer} está revisando…`);
         try {
           const prompt = `Review the implementation for correctness, regressions, security, and tests. Return only the required JSON. Task: ${compactTask(task)}\n${gate.status === 'passed' ? 'testCommand: passed' : 'testCommand: not configured'}\n${formatRecurringPatterns(recurring.patterns)}\n${config.workflow?.reviewContext ? formatContextSnippets(contextResults) : 'reviewContext: disabled'}\nTracked and untracked diff bundle:\n${bundle.content}`;
           const result = await runAgent({ agent: reviewer, config: execution(config, reviewer), tier: classification.level, cwd: worktree, review: true, failOnSeverity, prompt });
           review = result.review!; reviewsExecuted++;
+          if (review.approved) announce(`${iterationLabel} ${reviewer} revisou → aprovado`);
+          else {
+            const severity = highestSeverity(review.findings);
+            announce(`${iterationLabel} ${reviewer} revisou → mudanças solicitadas (${review.findings.length} findings${severity ? `, severidade: ${severity}` : ''})`);
+          }
           persistFindings(db, { projectId: project.id, runId: id, findings: review.findings, root: worktree });
           db.addFlowStep({ runId: id, phase: 'review', agent: reviewer, model: execution(config, reviewer).models[classification.level], status: review.approved ? 'approved' : 'changes_requested', durationMs: result.durationMs, inputTokens: result.inputTokens, outputTokens: result.outputTokens, exitCode: result.exitCode, modelClaimedApproved: result.modelClaimedApproved, approved: review.approved, summary: JSON.stringify({ review, modelClaimedApproved: result.modelClaimedApproved, testGate: gate.status, diff: { includedFiles: bundle.includedFiles, omittedFiles: bundle.omittedFiles }, recurring, reviewContext: { enabled: config.workflow?.reviewContext ?? false, snippets: contextResults.length, error: contextError } }).slice(0, 12000) });
           usage.push({ phase: 'review', agent: reviewer, inputTokens: result.inputTokens, outputTokens: result.outputTokens, durationMs: result.durationMs });
         } catch (cause) { recordFailure('review', reviewer, cause, reviewStarted); throw cause; }
-        if (review.approved) { status = 'approved'; break; }
+        if (review.approved) {
+          iterationSummaries.push(formatIterationSummary({ iteration: iterations, developer, reviewer, first: iterations === 1, outcome: 'approved' }));
+          status = 'approved'; break;
+        }
+        iterationSummaries.push(formatIterationSummary({ iteration: iterations, developer, reviewer, first: iterations === 1, outcome: iterations === maxIterations ? 'max_iterations' : 'changes_requested', findings: review.findings.length }));
       }
-      if (status !== 'approved') status = 'max_iterations';
+      if (status !== 'approved') { status = 'max_iterations'; announce(`[iteração ${maxIterations}/${maxIterations}] limite de iterações atingido sem aprovação`); }
       git(worktree, ['add','-A']); const patch = git(worktree, ['diff','--cached','--binary','HEAD']); await fs.writeFile(patchPath, patch);
       let appliedTo: string | undefined; let applied = false; let cleanupError: string | undefined;
       if (status === 'approved') {
@@ -164,7 +197,7 @@ export function registerFlowCommand(program: Command): void {
       const knownInputTokens = usage.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0); const knownOutputTokens = usage.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0); const unavailableSteps = usage.filter((item) => item.inputTokens === null || item.outputTokens === null).length;
       const reviewMetrics = { reviewsExecuted, reviewsAvoidedByGate, omittedFiles: [...omittedFiles], snippetsUsed, findingsConsulted, findingComparisons };
       const output = { id, status, tier: classification.level, mode, iterations: Math.min(iterations, maxIterations), worktree: status === 'approved' && !cleanupError ? null : worktree, branch: status === 'approved' && !cleanupError ? null : branch, patchPath, appliedTo, applied, cleanupError, review, usage, reviewMetrics, totals: { knownInputTokens, knownOutputTokens, unavailableSteps } };
-      if (options.json) console.log(JSON.stringify(output)); else { console.log(`run=${id} status=${status} tier=${classification.level} iterations=${output.iterations}`); for (const item of usage) console.log(`step=${item.phase} agent=${item.agent} inputTokens=${item.inputTokens ?? 'unavailable'} outputTokens=${item.outputTokens ?? 'unavailable'} durationMs=${item.durationMs}`); console.log(`reviewsExecuted=${reviewsExecuted} reviewsAvoidedByGate=${reviewsAvoidedByGate} snippetsUsed=${snippetsUsed} findingsConsulted=${findingsConsulted} findingComparisons=${findingComparisons}`); console.log(`knownInputTokens=${knownInputTokens} knownOutputTokens=${knownOutputTokens} unavailableSteps=${unavailableSteps}`); if (appliedTo) console.log(`appliedTo=${appliedTo} changes=${applied ? 'applied' : 'none'}`); if (cleanupError) { console.log(`worktree=${worktree}`); console.log(`cleanupError=${JSON.stringify(cleanupError)}`); } console.log(`patch=${patchPath}`); if (status !== 'approved') { console.log(`worktree=${worktree}`); console.log(`apply=git apply ${JSON.stringify(patchPath)}`); } if (review && !review.approved) for (const finding of review.findings) console.log(`finding=${finding.severity}:${finding.message}`); }
+      if (options.json) console.log(JSON.stringify(output)); else { console.log(`run=${id} status=${status} tier=${classification.level} iterations=${output.iterations}`); for (const summary of iterationSummaries) console.log(`  ${summary}`); for (const item of usage) console.log(`step=${item.phase} agent=${item.agent} inputTokens=${item.inputTokens ?? 'unavailable'} outputTokens=${item.outputTokens ?? 'unavailable'} durationMs=${item.durationMs}`); console.log(`reviewsExecuted=${reviewsExecuted} reviewsAvoidedByGate=${reviewsAvoidedByGate} snippetsUsed=${snippetsUsed} findingsConsulted=${findingsConsulted} findingComparisons=${findingComparisons}`); console.log(`knownInputTokens=${knownInputTokens} knownOutputTokens=${knownOutputTokens} unavailableSteps=${unavailableSteps}`); if (appliedTo) console.log(`appliedTo=${appliedTo} changes=${applied ? 'applied' : 'none'}`); if (cleanupError) { console.log(`worktree=${worktree}`); console.log(`cleanupError=${JSON.stringify(cleanupError)}`); } console.log(`patch=${patchPath}`); if (status !== 'approved') { console.log(`worktree=${worktree}`); console.log(`apply=git apply ${JSON.stringify(patchPath)}`); } if (review && !review.approved) for (const finding of review.findings) console.log(`finding=${finding.severity}:${finding.message}`); }
       if (status !== 'approved') process.exitCode = 2;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause); db.finishFlowRun(id, { status: 'failed', tier: classification.level, patchPath, iterations: Math.min(iterations, maxIterations), error }); throw cause;
