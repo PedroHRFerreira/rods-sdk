@@ -2,9 +2,36 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
+import { promoteApprovedPatch } from '../src/commands/flow.js';
 import { getMissingBuildWarning } from '../src/commands/init.js';
 import { planPackageUpdate } from '../src/commands/upgrade.js';
+
+function git(root: string, args: string[]): string { return execFileSync('git', args, { cwd: root, encoding: 'utf8' }); }
+
+test('approved flow patches are applied to the original branch working tree', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'rods-promote-'));
+  git(root, ['init','-b','main']); git(root, ['config','user.email','test@example.com']); git(root, ['config','user.name','Test']);
+  await fs.writeFile(path.join(root, 'file.txt'), 'before\n'); git(root, ['add','.']); git(root, ['commit','-m','initial']);
+  const head = git(root, ['rev-parse','HEAD']).trim();
+  await fs.writeFile(path.join(root, 'file.txt'), 'after\n'); const patch = git(root, ['diff','--binary','HEAD']); const patchPath = path.join(root, 'approved.patch'); await fs.writeFile(patchPath, patch); git(root, ['restore','file.txt']);
+
+  assert.deepEqual(promoteApprovedPatch({ root, patchPath, expectedBranch: 'main', expectedHead: head, hasChanges: true }), { branch: 'main', applied: true });
+  assert.equal(await fs.readFile(path.join(root, 'file.txt'), 'utf8'), 'after\n');
+  assert.match(git(root, ['status','--short']), / M file\.txt/);
+});
+
+test('approved flow promotion refuses a moved branch and preserves its patch', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'rods-promote-moved-'));
+  git(root, ['init','-b','main']); git(root, ['config','user.email','test@example.com']); git(root, ['config','user.name','Test']);
+  await fs.writeFile(path.join(root, 'file.txt'), 'before\n'); git(root, ['add','.']); git(root, ['commit','-m','initial']);
+  const expectedHead = git(root, ['rev-parse','HEAD']).trim(); const patchPath = path.join(root, 'approved.patch'); await fs.writeFile(patchPath, 'preserved patch');
+  await fs.writeFile(path.join(root, 'other.txt'), 'new head\n'); git(root, ['add','.']); git(root, ['commit','-m','move']);
+
+  assert.throws(() => promoteApprovedPatch({ root, patchPath, expectedBranch: 'main', expectedHead, hasChanges: true }), /Cannot promote approved flow/);
+  assert.equal(await fs.readFile(patchPath, 'utf8'), 'preserved patch');
+});
 
 test('package.json includes prepare build script for git installs', async () => {
   const packageJson = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8')) as {

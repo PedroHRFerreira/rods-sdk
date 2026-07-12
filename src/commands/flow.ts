@@ -24,6 +24,15 @@ import {
 
 type FlowMode = string;
 function git(root: string, args: string[]): string { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','pipe'] }); }
+export function promoteApprovedPatch(input: { root: string; patchPath: string; expectedBranch: string; expectedHead: string; hasChanges: boolean }): { branch: string; applied: boolean } {
+  const branch = git(input.root, ['branch','--show-current']).trim();
+  const head = git(input.root, ['rev-parse','HEAD']).trim();
+  if (branch !== input.expectedBranch || head !== input.expectedHead) throw new Error(`Cannot promote approved flow: expected ${input.expectedBranch}@${input.expectedHead.slice(0, 12)}, found ${branch || 'detached HEAD'}@${head.slice(0, 12)}. The patch was preserved at ${input.patchPath}`);
+  if (!input.hasChanges) return { branch, applied: false };
+  try { git(input.root, ['apply','--check',input.patchPath]); git(input.root, ['apply',input.patchPath]); }
+  catch (cause) { throw new Error(`Cannot promote approved flow to ${branch}: the patch does not apply cleanly. It was preserved at ${input.patchPath}. ${cause instanceof Error ? cause.message : String(cause)}`); }
+  return { branch, applied: true };
+}
 function agents(mode: FlowMode): [AgentTarget, AgentTarget] { const parts = mode.split('+') as AgentTarget[]; return [parts[0], parts[1] ?? parts[0]]; }
 function execution(config: IGovernanceConfig, agent: AgentTarget) { const value = config.targets[agent].execution; if (!value) throw new Error(`Execution is not configured for ${agent}`); return value; }
 function modelForRecord(config: IGovernanceConfig, agent: AgentTarget, tier: string): string {
@@ -82,6 +91,8 @@ export function registerFlowCommand(program: Command): void {
     if (!isValidFlowMode(mode)) throw new Error(`Invalid flow mode: ${mode}`);
     if (!config.escalation?.enabled || config.escalation.mode !== 'execute') throw new Error('Enable escalation and set escalation.mode to "execute" before running agents');
     git(root, ['rev-parse','--show-toplevel']);
+    const originalBranch = git(root, ['branch','--show-current']).trim(); const originalHead = git(root, ['rev-parse','HEAD']).trim();
+    if (!originalBranch) throw new Error('rods flow run requires an active branch; detached HEAD cannot receive approved changes');
     const policy = await loadComplexityPolicy(root); let classification = classifyTask({ task, root, policy, preExecution: true });
     const [developer, reviewer] = agents(mode); const maxIterations = config.workflow?.maxIterations ?? 3; const failOnSeverity = config.workflow?.failOnSeverity ?? 'high';
     if (!Number.isSafeInteger(maxIterations) || maxIterations < 1) throw new Error('workflow.maxIterations must be >= 1');
@@ -143,14 +154,20 @@ export function registerFlowCommand(program: Command): void {
       }
       if (status !== 'approved') status = 'max_iterations';
       git(worktree, ['add','-A']); const patch = git(worktree, ['diff','--cached','--binary','HEAD']); await fs.writeFile(patchPath, patch);
+      let appliedTo: string | undefined; let applied = false; let cleanupError: string | undefined;
+      if (status === 'approved') {
+        const promotion = promoteApprovedPatch({ root, patchPath, expectedBranch: originalBranch, expectedHead: originalHead, hasChanges: patch.length > 0 });
+        appliedTo = promotion.branch; applied = promotion.applied;
+        try { git(root, ['worktree','remove','--force',worktree]); git(root, ['branch','-D',branch]); } catch (cause) { cleanupError = cause instanceof Error ? cause.message : String(cause); }
+      }
       db.finishFlowRun(id, { status, tier: classification.level, patchPath, iterations: Math.min(iterations, maxIterations) });
       const knownInputTokens = usage.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0); const knownOutputTokens = usage.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0); const unavailableSteps = usage.filter((item) => item.inputTokens === null || item.outputTokens === null).length;
       const reviewMetrics = { reviewsExecuted, reviewsAvoidedByGate, omittedFiles: [...omittedFiles], snippetsUsed, findingsConsulted, findingComparisons };
-      const output = { id, status, tier: classification.level, mode, iterations: Math.min(iterations, maxIterations), worktree, branch, patchPath, review, usage, reviewMetrics, totals: { knownInputTokens, knownOutputTokens, unavailableSteps } };
-      if (options.json) console.log(JSON.stringify(output)); else { console.log(`run=${id} status=${status} tier=${classification.level} iterations=${output.iterations}`); for (const item of usage) console.log(`step=${item.phase} agent=${item.agent} inputTokens=${item.inputTokens ?? 'unavailable'} outputTokens=${item.outputTokens ?? 'unavailable'} durationMs=${item.durationMs}`); console.log(`reviewsExecuted=${reviewsExecuted} reviewsAvoidedByGate=${reviewsAvoidedByGate} snippetsUsed=${snippetsUsed} findingsConsulted=${findingsConsulted} findingComparisons=${findingComparisons}`); console.log(`knownInputTokens=${knownInputTokens} knownOutputTokens=${knownOutputTokens} unavailableSteps=${unavailableSteps}`); console.log(`worktree=${worktree}`); console.log(`patch=${patchPath}`); console.log(`apply=git apply ${JSON.stringify(patchPath)}`); if (review && !review.approved) for (const finding of review.findings) console.log(`finding=${finding.severity}:${finding.message}`); }
+      const output = { id, status, tier: classification.level, mode, iterations: Math.min(iterations, maxIterations), worktree: status === 'approved' && !cleanupError ? null : worktree, branch: status === 'approved' && !cleanupError ? null : branch, patchPath, appliedTo, applied, cleanupError, review, usage, reviewMetrics, totals: { knownInputTokens, knownOutputTokens, unavailableSteps } };
+      if (options.json) console.log(JSON.stringify(output)); else { console.log(`run=${id} status=${status} tier=${classification.level} iterations=${output.iterations}`); for (const item of usage) console.log(`step=${item.phase} agent=${item.agent} inputTokens=${item.inputTokens ?? 'unavailable'} outputTokens=${item.outputTokens ?? 'unavailable'} durationMs=${item.durationMs}`); console.log(`reviewsExecuted=${reviewsExecuted} reviewsAvoidedByGate=${reviewsAvoidedByGate} snippetsUsed=${snippetsUsed} findingsConsulted=${findingsConsulted} findingComparisons=${findingComparisons}`); console.log(`knownInputTokens=${knownInputTokens} knownOutputTokens=${knownOutputTokens} unavailableSteps=${unavailableSteps}`); if (appliedTo) console.log(`appliedTo=${appliedTo} changes=${applied ? 'applied' : 'none'}`); if (cleanupError) { console.log(`worktree=${worktree}`); console.log(`cleanupError=${JSON.stringify(cleanupError)}`); } console.log(`patch=${patchPath}`); if (status !== 'approved') { console.log(`worktree=${worktree}`); console.log(`apply=git apply ${JSON.stringify(patchPath)}`); } if (review && !review.approved) for (const finding of review.findings) console.log(`finding=${finding.severity}:${finding.message}`); }
       if (status !== 'approved') process.exitCode = 2;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause); db.finishFlowRun(id, { status: 'failed', tier: classification.level, iterations: Math.min(iterations, maxIterations), error }); throw cause;
+      error = cause instanceof Error ? cause.message : String(cause); db.finishFlowRun(id, { status: 'failed', tier: classification.level, patchPath, iterations: Math.min(iterations, maxIterations), error }); throw cause;
     } finally { db.close(); }
   });
 }
