@@ -55,7 +55,9 @@ test('pre-execution classification never reads an unrelated repository diff', as
     assert.equal(classifyTask({ task: 'ajuste pontual', root, policy, preExecution: true }).level, 'simple');
     await assert.rejects(() => fs.readFile(calls, 'utf8'), /ENOENT/);
     assert.equal(classifyTask({ task: 'ajuste pontual', root, policy }).level, 'medium');
-    assert.equal((await fs.readFile(calls, 'utf8')).trim(), root);
+    // macOS exposes /var as a symlink to /private/var; compare physical paths
+    // because the shell reports $PWD after resolving that link.
+    assert.equal((await fs.readFile(calls, 'utf8')).trim(), await fs.realpath(root));
   } finally {
     if (previousPath === undefined) delete process.env.PATH;
     else process.env.PATH = previousPath;
