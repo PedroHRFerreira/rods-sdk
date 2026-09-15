@@ -1,12 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { ContextBudget, PowerMode } from "./types.js";
+import type { ContextBudget, LocalOnlyNetworkPolicy, PowerMode } from "./types.js";
 import { RodsLocalError } from "./errors.js";
 
 export interface LocalFirstConfig {
   localFirst: {
     runtime?: string;
     harness?: string;
+    localOnlyNetworkPolicy: LocalOnlyNetworkPolicy;
     powerMode: PowerMode;
     timeoutMs: number;
     maxRetries: number;
@@ -24,6 +25,7 @@ export interface LocalFirstConfig {
 export const DEFAULT_LOCAL_FIRST_CONFIG: LocalFirstConfig = {
   localFirst: {
     powerMode: "auto",
+    localOnlyNetworkPolicy: "require-isolation",
     timeoutMs: 120_000,
     maxRetries: 1,
     validation: { lint: false, typecheck: false, test: false, build: false },
@@ -240,6 +242,13 @@ function validateLocalFirst(
     (typeof config.harness !== "string" || !config.harness.trim())
   )
     invalid("localFirst.harness must be a non-empty string");
+  if (
+    config.localOnlyNetworkPolicy !== undefined &&
+    !["require-isolation", "allow-unisolated"].includes(
+      config.localOnlyNetworkPolicy as string,
+    )
+  )
+    invalid("localFirst.localOnlyNetworkPolicy is invalid");
   if (
     config.powerMode !== undefined &&
     !["eco", "balanced", "performance", "max", "auto"].includes(

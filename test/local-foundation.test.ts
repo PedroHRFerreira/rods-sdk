@@ -37,6 +37,10 @@ import { OllamaRuntimeAdapter } from "../src/local/ollama-runtime.js";
 import { LMStudioRuntimeAdapter } from "../src/local/lmstudio-runtime.js";
 import { collectMachineProfile } from "../src/local/machine-profile.js";
 import { CodexHarnessAdapter } from "../src/local/codex-harness.js";
+import {
+  evaluateLocalOnlyGate,
+  UNSUPPORTED_NETWORK_ISOLATION,
+} from "../src/local/local-only-gate.js";
 
 test("context selection honors ignore, sensitive-data, and explicit budgets", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rods-context-"));
@@ -180,6 +184,7 @@ test("local-first config merge is idempotent and preserves unrelated settings", 
     { localFirst: { timeoutMs: 0 } },
     { localFirst: { validation: { test: "yes" } } },
     { localFirst: { contextBudget: { maxFiles: 0 } } },
+    { localFirst: { localOnlyNetworkPolicy: "disable-security" } },
   ]) {
     assert.throws(
       () => mergeLocalFirstConfig(invalid),
@@ -438,6 +443,74 @@ test("Codex harness refuses to infer a local route from CLI availability", async
     ready: false,
     diagnostics: proof.diagnostics,
   });
+});
+
+test("local-only gate centralizes locality, harness, and network decisions", () => {
+  const localityProof = {
+    runtime: "ollama",
+    endpoint: "http://127.0.0.1:11434/api/tags",
+    loopback: true,
+    model: "qwen2.5-coder:7b",
+    runtimeVerified: true,
+    modelVerified: true,
+    verifiedAt: "2026-09-14T00:00:00.000Z",
+    evidence: [],
+  } as const;
+  const unverifiableHarness = {
+    harness: "codex",
+    routeVerified: false,
+    cloudFallbackEnabled: "unknown",
+    cloudCredentialsRequired: "unknown",
+    evidence: [],
+    diagnostics: ["HARNESS_ROUTE_UNVERIFIED"],
+  } as const;
+  assert.deepEqual(
+    evaluateLocalOnlyGate({
+      localityProof,
+      harnessProof: unverifiableHarness,
+      networkProof: UNSUPPORTED_NETWORK_ISOLATION,
+      networkPolicy: "require-isolation",
+    }),
+    {
+      allowed: false,
+      errorCode: "HARNESS_NOT_READY",
+      reasons: [
+        "Codex provider, endpoint, model, and no-cloud route must be verified",
+        "HARNESS_ROUTE_UNVERIFIED",
+      ],
+    },
+  );
+  const verifiedHarness = {
+    ...unverifiableHarness,
+    routeVerified: true,
+    cloudFallbackEnabled: false,
+    cloudCredentialsRequired: false,
+    diagnostics: [],
+  } as const;
+  assert.equal(
+    evaluateLocalOnlyGate({
+      localityProof,
+      harnessProof: verifiedHarness,
+      networkProof: UNSUPPORTED_NETWORK_ISOLATION,
+      networkPolicy: "require-isolation",
+    }).errorCode,
+    "NETWORK_ISOLATION_UNAVAILABLE",
+  );
+  assert.deepEqual(
+    evaluateLocalOnlyGate({
+      localityProof,
+      harnessProof: verifiedHarness,
+      networkProof: {
+        supported: true,
+        enabled: true,
+        loopbackAllowed: true,
+        externalNetworkBlocked: true,
+        mechanism: "test",
+      },
+      networkPolicy: "require-isolation",
+    }),
+    { allowed: true, reasons: [] },
+  );
 });
 
 test("local-only router cannot resolve a cloud registry path", () => {

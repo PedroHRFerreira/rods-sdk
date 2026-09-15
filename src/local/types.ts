@@ -144,6 +144,16 @@ export type RuntimeVerification = {
 
 export type CodexLocalProvider = "ollama" | "lmstudio";
 export type VerificationState = true | false | "unknown";
+export type LocalOnlyNetworkPolicy = "require-isolation" | "allow-unisolated";
+
+/** OS-level evidence; this is intentionally distinct from a harness sandbox. */
+export type NetworkIsolationProof = {
+  supported: boolean;
+  enabled: boolean;
+  loopbackAllowed: boolean;
+  externalNetworkBlocked: boolean;
+  mechanism?: string;
+};
 
 /**
  * Evidence about the route selected by the execution harness.  It is separate
@@ -161,6 +171,18 @@ export type HarnessRouteProof = {
   evidence: RuntimeEvidence[];
   diagnostics: string[];
 };
+
+export type LocalOnlyGateDecision =
+  | { allowed: true; reasons: [] }
+  | {
+      allowed: false;
+      errorCode:
+        | "LOCALITY_NOT_VERIFIED"
+        | "LOCAL_MODEL_NOT_AVAILABLE"
+        | "HARNESS_NOT_READY"
+        | "NETWORK_ISOLATION_UNAVAILABLE";
+      reasons: string[];
+    };
 
 export type HarnessDiscovery =
   | { installed: true; ready: true; diagnostics: string[] }

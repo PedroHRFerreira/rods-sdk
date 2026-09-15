@@ -58,6 +58,13 @@ modelo ou fallback cloud. Assim, o relatório mantém `routeVerified: false` e
 os campos de cloud como `unknown`; o RODS não interpreta help ou configuração
 interna como prova.
 
+`--local-only` passa pelo `LocalOnlyGate`, a única autoridade que pode permitir
+o início do harness. Ele exige localidade e modelo verificados, rota Codex
+verificada, fallback e credenciais cloud comprovadamente ausentes e, por padrão,
+isolamento de rede no SO. A política `localFirst.localOnlyNetworkPolicy` usa
+`require-isolation` por padrão; `allow-unisolated` é uma escolha explícita para
+plataformas onde o isolamento não pode ser imposto.
+
 ### Arquitetura e decisão de segurança
 
 ```text
@@ -90,7 +97,9 @@ cloud calls = 0
 O MVP E2E só será concluído quando uma fixture real executar `rods run
 --local-only` e comprovar runtime, modelo, conexão do harness, alteração na
 worktree, validação e patch — tudo sem chamadas cloud e sem tocar o workspace
-primário.
+primário. O roadmap separa a infraestrutura E2E (PR 4A) do E2E local
+verificado (PR 4B): este último permanece bloqueado até o Codex expor prova
+estruturada de provider, endpoint, modelo e ausência de fallback cloud.
 
 ## Instalação
 

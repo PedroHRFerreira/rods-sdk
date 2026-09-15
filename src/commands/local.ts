@@ -33,11 +33,18 @@ import { OllamaRuntimeAdapter } from "../local/ollama-runtime.js";
 import { LMStudioRuntimeAdapter } from "../local/lmstudio-runtime.js";
 import { LocalRuntimeRegistry } from "../local/registry.js";
 import { CodexHarnessAdapter } from "../local/codex-harness.js";
+import {
+  evaluateLocalOnlyGate,
+  UNSUPPORTED_NETWORK_ISOLATION,
+} from "../local/local-only-gate.js";
 import type {
   DecisionTrace,
   ExecutionHarness,
   ExecutionResult,
   HarnessRouteProof,
+  LocalityProof,
+  LocalOnlyGateDecision,
+  LocalOnlyNetworkPolicy,
   LocalRuntime,
   LocalRuntimeAdapter,
   PowerMode,
@@ -64,6 +71,8 @@ export interface LocalHarness extends ExecutionHarness {
 export interface LocalExecutionDependencies {
   runtime: LocalRuntime;
   harness: LocalHarness;
+  /** Required by live --local-only execution; test doubles may omit it. */
+  gate?: () => Promise<LocalOnlyGateDecision>;
   runner?: ProcessRunner;
   context?: (root: string, task: string) => Promise<ContextCandidate[] | null>;
 }
@@ -183,12 +192,20 @@ export class LocalExecutionEngine {
         reason: "primary-workspace-dirty",
       });
     const runtime = await this.dependencies.runtime.discover(options.signal);
+    const harness = await this.dependencies.harness.discover(options.signal);
+    if (this.dependencies.gate) {
+      const gate = await this.dependencies.gate();
+      if (!gate.allowed)
+        throw new RodsLocalError(
+          gate.errorCode,
+          gate.reasons.join("; ") || "Local-Only policy denied execution",
+        );
+    }
     if (!runtime.installed || !runtime.ready)
       throw new RodsLocalError(
         "LOCAL_RUNTIME_NOT_READY",
         runtime.diagnostics.join("; ") || "Local runtime is not ready",
       );
-    const harness = await this.dependencies.harness.discover(options.signal);
     if (!harness.installed || !harness.ready)
       throw new RodsLocalError(
         "HARNESS_NOT_READY",
@@ -697,6 +714,20 @@ function liveCodex(): CodexLocalHarness {
   };
 }
 
+async function evaluateLiveLocalOnlyGate(root: string): Promise<LocalOnlyGateDecision> {
+  const [config, runtimeVerification, harnessProof] = await Promise.all([
+    loadLocalFirstConfig(root),
+    new OllamaRuntimeAdapter().verify(),
+    liveCodex().verifyLocalRoute(),
+  ]);
+  return evaluateLocalOnlyGate({
+    localityProof: runtimeVerification.proof,
+    harnessProof,
+    networkProof: UNSUPPORTED_NETWORK_ISOLATION,
+    networkPolicy: config.config.localFirst.localOnlyNetworkPolicy,
+  });
+}
+
 export function registerLocalCommands(program: Command): void {
   program
     .command("setup")
@@ -771,6 +802,7 @@ export function registerLocalCommands(program: Command): void {
         const engine = new LocalExecutionEngine({
           runtime: liveMagnitude(),
           harness: liveCodex(),
+          gate: () => evaluateLiveLocalOnlyGate(path.resolve(options.root)),
         });
         const cancellation = new AbortController();
         const onSigint = () => cancellation.abort();
@@ -796,7 +828,7 @@ export type ComputeRuntimeReport = {
   ready: boolean;
   locality: "verified-local" | "unverified" | "remote";
   models: string[];
-  proof?: Record<string, unknown>;
+  proof?: LocalityProof;
   experimental: boolean;
   diagnostics: string[];
 };
@@ -811,13 +843,18 @@ export type ComputeDoctorReport = {
     e2eReady: false;
   };
   harnessRoute: HarnessRouteProof;
+  networkIsolation: typeof UNSUPPORTED_NETWORK_ISOLATION;
+  gate: LocalOnlyGateDecision;
 };
 
 function supportsVerification(runtime: LocalRuntime): runtime is LocalRuntimeAdapter {
   return "verify" in runtime && typeof runtime.verify === "function";
 }
 
-async function computeDoctor(root: string): Promise<ComputeDoctorReport> {
+async function computeDoctor(
+  root: string,
+  networkPolicy: LocalOnlyNetworkPolicy,
+): Promise<ComputeDoctorReport> {
   const registry = liveRuntimeRegistry();
   const codex = liveCodex();
   const [machine, runtimes, harnessRoute] = await Promise.all([
@@ -855,6 +892,13 @@ async function computeDoctor(root: string): Promise<ComputeDoctorReport> {
   const verified = runtimes.filter(
     (runtime) => runtime.locality === "verified-local",
   );
+  const networkIsolation = UNSUPPORTED_NETWORK_ISOLATION;
+  const gate = evaluateLocalOnlyGate({
+    localityProof: verified[0]?.proof,
+    harnessProof: harnessRoute,
+    networkProof: networkIsolation,
+    networkPolicy,
+  });
   return {
     machine,
     runtimes,
@@ -866,6 +910,8 @@ async function computeDoctor(root: string): Promise<ComputeDoctorReport> {
       e2eReady: false,
     },
     harnessRoute,
+    networkIsolation,
+    gate,
   };
 }
 
@@ -950,6 +996,10 @@ export async function localDoctor(root: string, options: { compute?: boolean } =
       configPath: localConfig.path,
     },
   };
-  if (options.compute) report.compute = await computeDoctor(root);
+  if (options.compute)
+    report.compute = await computeDoctor(
+      root,
+      localConfig.config.localFirst.localOnlyNetworkPolicy,
+    );
   return report;
 }

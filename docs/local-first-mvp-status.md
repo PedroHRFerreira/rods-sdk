@@ -16,6 +16,12 @@ atestado da rota efetiva. Por isso `harnessRoute.routeVerified` permanece
 `false`, e fallback/credenciais cloud ficam `unknown`; o resultado seguro é
 `HARNESS_NOT_READY`.
 
+O PR 3 centralizou `LocalityProof`, `HarnessRouteProof`,
+`NetworkIsolationProof` e `LocalOnlyPolicy` no `LocalOnlyGate`. A política
+padrão exige isolamento de rede; esta versão ainda não tem uma prova de
+isolamento no nível do SO, portanto esse requisito também falha de forma
+estruturada quando a rota do harness estiver pronta.
+
 A foundation inclui `rods setup`, `rods doctor`, `rods run`, Context Engine com orçamento de contexto, filtros de segredos, runtime e harness separados, worktree isolada, patch sanitizado, validação opt-in, zero-cloud em `--local-only` e testes com doubles.
 
 ## Verificação
@@ -23,7 +29,7 @@ A foundation inclui `rods setup`, `rods doctor`, `rods run`, Context Engine com 
 ```text
 npm run typecheck  ✓
 npm run build      ✓
-npm test           ✓ 89/89
+npm test           ✓ 91/91
 ```
 
 ## Discovery verificado
@@ -50,13 +56,36 @@ cloud calls = 0
 
 ## O que bloqueia o MVP E2E
 
-Falta identificar ou disponibilizar um contrato estruturado e confiável que permita verificar, sem parsing frágil de terminal:
+O bloqueador externo para o E2E verificado é um contrato estruturado e confiável
+do Codex que permita verificar, sem parsing frágil de terminal:
 
-1. runtime Magnitude pronto;
+1. runtime local verificado e modelo utilizável;
 2. modelo local compatível disponível e utilizável pelo runtime;
-3. conexão Codex → Magnitude configurada;
+3. provider Codex configurado e efetivamente selecionado;
 4. endpoint usado pelo Codex é local;
-5. fallback ou inicialização cloud está desabilitado;
-6. execução real funciona sem credenciais cloud no processo do harness.
+5. modelo usado pelo Codex corresponde ao runtime verificado;
+6. fallback ou inicialização cloud está desabilitado;
+7. execução real funciona sem credenciais cloud no processo do harness.
 
 Até existir uma interface pública e verificável que prove essas propriedades, a classificação correta é **Local-First Foundation**, e não **Completed Local-First MVP**.
+
+## Roadmap oficial
+
+| PR | Escopo | Estado |
+| --- | --- | --- |
+| 1 | Local Compute Foundation | Concluído |
+| 2 | Harness Route Proof | Concluído — rota Codex não verificável nesta versão |
+| 3 | Local-Only Security Gate | Concluído |
+| 4A | E2E Security Infrastructure | Próximo |
+| 4B | Verified Local E2E | Bloqueado por contrato externo do Codex |
+
+O gate centralizado nega a execução antes de iniciar o harness. Com o estado
+atual, a razão é `HARNESS_NOT_READY`; harness não será iniciado, arquivos não
+serão alterados e `cloudCalls` permanecerá zero. Quando a rota do harness for
+verificada, a política padrão ainda exigirá uma `NetworkIsolationProof` de que
+loopback está liberado e rede externa bloqueada.
+
+O PR 4A pode integrar fixture real, worktree, validação, patch, relatório e o
+gate de segurança. O PR 4B só será liberado quando uma capacidade oficial
+permitir que `CodexHarness.verifyLocalRoute()` produza prova de provider,
+endpoint, modelo e rota sem cloud.
