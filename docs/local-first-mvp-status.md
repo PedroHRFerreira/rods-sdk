@@ -79,7 +79,7 @@ Até existir uma interface pública e verificável que prove essas propriedades,
 | 4A | E2E Security Infrastructure | Concluído |
 | 4B.1 | Effective Route Contract | Concluído — contratos e gate composto |
 | 4B.2 | Linux Network Confinement | Concluído — `bwrap` + gateway loopback privado |
-| 4B.3 | OpenCode Confinement Evaluation | Dependente de 4B.2 e Ollama real |
+| 4B.3 | OpenCode Confinement Evaluation | Bloqueado no ambiente atual — confinamento Linux indisponível e Ollama ausente |
 | 4B.4 | Verified Local E2E | Dependente de 4B.3 |
 
 O gate centralizado nega a execução antes de iniciar o harness. Com o estado
@@ -170,3 +170,15 @@ sandboxes nas quais o kernel recusa o namespace, o resultado é
 `NETWORK_ISOLATION_UNAVAILABLE`. A execução também recusa allowlists com mais
 de um endpoint ou qualquer endpoint fora de loopback. A disponibilidade real
 para OpenCode + Ollama segue pendente do experimento PR 4B.3.
+
+## PR 4B.3 — OpenCode Confinement Evaluation
+
+O experimento real não iniciou neste ambiente: embora `bwrap` esteja instalado,
+o probe do kernel recusou criar o namespace de rede e retornou
+`NETWORK_ISOLATION_UNAVAILABLE`. Ollama também não está instalado, portanto não
+há runtime nem modelo local para verificar (`LOCAL_RUNTIME_NOT_READY`).
+
+Nenhum processo OpenCode foi iniciado, nenhuma inferência foi tentada, nenhuma
+worktree foi criada e conexões externas bem-sucedidas permanecem zero. O PR
+4B.4 continua bloqueado até uma máquina Linux com suporte efetivo ao namespace
+e um Ollama com modelo local estejam disponíveis para o teste real.
