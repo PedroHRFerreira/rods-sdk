@@ -42,7 +42,7 @@ export class CodexHarnessAdapter implements ExecutionHarness {
         },
       ],
       diagnostics: [
-        "HARNESS_ROUTE_UNVERIFIED: Codex does not expose a structured proof of active provider, endpoint, model, or cloud fallback",
+        "CODEX_HARNESS_CONTRACT_INSUFFICIENT: Codex does not expose a structured proof of active provider, endpoint, model, or cloud fallback",
       ],
     };
   }

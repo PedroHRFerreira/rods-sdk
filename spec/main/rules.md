@@ -11,3 +11,5 @@
 - Magnitude may be discovered and diagnosed but is ineligible for `--local-only` until it produces equivalent locality evidence.
 - A healthy runtime does not imply a healthy harness: Codex must independently provide a `HarnessRouteProof` for `--local-only`.
 - When a required proof is unavailable, preserve fail-closed behavior and report the structured blocker; never weaken the proof criterion, parse undocumented internals, or silently fall back to cloud.
+- Treat execution harnesses as replaceable: keep Codex supported, but make it ineligible for `--local-only` while `verifiedLocalRoute` is false.
+- Admit an alternative harness to `--local-only` only when a documented, structured contract proves the active provider, resolved endpoint, effective model, correspondence to the verified runtime, authentication requirement, and absence of cloud fallback.

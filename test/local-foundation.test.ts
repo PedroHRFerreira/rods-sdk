@@ -437,7 +437,7 @@ test("Codex harness refuses to infer a local route from CLI availability", async
   assert.equal(proof.routeVerified, false);
   assert.equal(proof.cloudFallbackEnabled, "unknown");
   assert.equal(proof.cloudCredentialsRequired, "unknown");
-  assert.match(proof.diagnostics[0]!, /HARNESS_ROUTE_UNVERIFIED/);
+  assert.match(proof.diagnostics[0]!, /CODEX_HARNESS_CONTRACT_INSUFFICIENT/);
   assert.deepEqual(await harness.discover(), {
     installed: true,
     ready: false,

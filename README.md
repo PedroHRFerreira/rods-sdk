@@ -105,6 +105,18 @@ A fixture E2E de segurança já verifica infraestrutura real — repositório Gi
 worktree isolada, patch, relatório sanitizado e validação determinística — e
 também que uma rota de harness não verificada é bloqueada antes da execução.
 
+O discovery oficial do Codex encontrou apenas atestação parcial via app-server:
+provider/model configurados e `requiresOpenaiAuth`. Como endpoint resolvido,
+modelo efetivo e fallback cloud não possuem contrato público suficiente, o
+diagnóstico é `CODEX_HARNESS_CONTRACT_INSUFFICIENT` e `--local-only` permanece
+bloqueado com `HARNESS_NOT_READY`.
+
+Codex continua sendo um `ExecutionHarness` suportado, mas não é o único
+possível: um harness alternativo só poderá liberar `--local-only` ao produzir
+um `HarnessRouteProof` estruturado para provider, endpoint, modelo, runtime,
+autenticação e ausência de fallback cloud. O gate não será relaxado para
+acomodar nenhum provider.
+
 ## Instalação
 
 ```bash

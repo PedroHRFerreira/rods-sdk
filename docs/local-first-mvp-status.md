@@ -77,7 +77,8 @@ Até existir uma interface pública e verificável que prove essas propriedades,
 | 2 | Harness Route Proof | Concluído — rota Codex não verificável nesta versão |
 | 3 | Local-Only Security Gate | Concluído |
 | 4A | E2E Security Infrastructure | Concluído |
-| 4B | Verified Local E2E | Bloqueado por contrato externo do Codex |
+| 4B | Verified Local E2E | Bloqueado externamente — `CODEX_HARNESS_CONTRACT_INSUFFICIENT` |
+| Próximo | Alternative Harness Evaluation | Planejado |
 
 O gate centralizado nega a execução antes de iniciar o harness. Com o estado
 atual, a razão é `HARNESS_NOT_READY`; harness não será iniciado, arquivos não
@@ -91,3 +92,46 @@ negado confirma `HARNESS_NOT_READY`, sem executar harness, alterar arquivos ou
 criar worktree adicional. O PR 4B só será liberado quando uma capacidade oficial
 permitir que `CodexHarness.verifyLocalRoute()` produza prova de provider,
 endpoint, modelo e rota sem cloud.
+
+## PR 4B — Codex Official Contract Discovery
+
+O discovery comparou somente interfaces oficiais, sem atualizar o Codex e sem
+interpretar output humano ou configuração interna. O CLI instalado `0.154.0`
+gera schemas JSON oficiais para o app-server. Eles expõem `model_provider` e
+`model` em `config/read`, `modelProvider` na thread e `requiresOpenaiAuth` em
+`account/read`; o próprio schema esclarece que o modelo de thread não é
+telemetria por turno. Não há campo público para endpoint/base URL resolvido,
+modelo efetivamente atendido pelo runtime ou comportamento de fallback cloud.
+
+| Capacidade | 0.154.0 instalado | Latest stable 0.154.0 | Preview 0.155.0-alpha.5 |
+| --- | --- | --- | --- |
+| Provider local anunciado | ✓ | ✓ | Não instalado; não atestado por docs |
+| Provider ativo estruturado | Parcial: estado de thread | Parcial | Não demonstrado |
+| Endpoint resolvido | ✗ | ✗ | Não demonstrado |
+| Modelo efetivo por execução | ✗ | ✗ | Não demonstrado |
+| Sem autenticação OpenAI | Parcial: `requiresOpenaiAuth` | Parcial | Não demonstrado |
+| Sem fallback cloud | ✗ | ✗ | Não demonstrado |
+| Contrato suficiente | ✗ | ✗ | ✗ por ausência de evidência pública |
+
+O `HarnessRouteProof` agora registra
+`CODEX_HARNESS_CONTRACT_INSUFFICIENT` e o `LocalOnlyGate` continua devolvendo
+`HARNESS_NOT_READY`. Não há workaround implementado. A prévia permanece apenas
+como candidata a ser reavaliada quando publicar um contrato estável e completo.
+
+## Próximo passo — Alternative Harness Evaluation
+
+O RODS passa a tratar o harness como uma fronteira substituível. O
+`CodexHarness` permanece suportado para coding e providers locais, mas sua
+capacidade `verifiedLocalRoute` é atualmente falsa; ele não é elegível para
+`--local-only`. Nenhum comportamento do `LocalOnlyGate` muda por esse motivo.
+
+| Harness | Coding | Provider local | Rota local verificável | Estado |
+| --- | --- | --- | --- | --- |
+| Codex | ✓ | ✓ | ✗ | `CODEX_HARNESS_CONTRACT_INSUFFICIENT` |
+| Alternativo | A avaliar | A avaliar | A avaliar | Não selecionado |
+
+Um candidato só poderá produzir um `HarnessRouteProof` elegível se um contrato
+público e estruturado atestar provider ativo, endpoint resolvido, modelo
+efetivamente usado, correspondência com o runtime verificado, requisito de
+autenticação e ausência de fallback cloud. Até lá, a resposta correta do gate
+é negar a execução, sem workaround ou inferência por configuração aparente.
