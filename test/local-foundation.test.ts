@@ -670,7 +670,7 @@ test("Codex local harness command has a fixed workspace-write sandbox policy", (
   );
 });
 
-test("injectable local engine produces an isolated unvalidated patch without resolving cloud", async () => {
+test("E2E security fixture produces a validated isolated patch without resolving cloud", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rods-local-run-"));
   execFileSync("git", ["init", "-b", "main"], { cwd: root });
   execFileSync("git", ["config", "user.email", "test@example.com"], {
@@ -683,11 +683,16 @@ test("injectable local engine produces an isolated unvalidated patch without res
   );
   await fs.writeFile(
     path.join(root, "package.json"),
-    JSON.stringify({ scripts: {} }),
+    JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }),
   );
   await fs.writeFile(path.join(root, "package-lock.json"), "{}");
   execFileSync("git", ["add", "."], { cwd: root });
   execFileSync("git", ["commit", "-m", "initial"], { cwd: root });
+  await fs.mkdir(path.join(root, ".ai"));
+  await fs.writeFile(
+    path.join(root, ".ai", "config.json"),
+    JSON.stringify({ localFirst: { validation: { test: true } } }),
+  );
   await fs.writeFile(path.join(root, "dirty.txt"), "primary only");
   let cloudTouched = false;
   const engine = new LocalExecutionEngine({
@@ -732,6 +737,7 @@ test("injectable local engine produces an isolated unvalidated patch without res
         );
       },
     },
+    gate: async () => ({ allowed: true, reasons: [] }),
     context: async () => [
       { path: "source.ts", content: "export const before = true;", score: 1 },
     ],
@@ -744,7 +750,7 @@ test("injectable local engine produces an isolated unvalidated patch without res
   });
   const result = await engine.run({ root, task: "Update source" });
   assert.equal(result.status, "SUCCESS");
-  assert.equal(result.validation.status, "UNVALIDATED");
+  assert.equal(result.validation.status, "VALIDATED");
   assert.equal(result.cloudCalls, 0);
   assert.equal(cloudTouched, false);
   assert.equal(
@@ -757,6 +763,65 @@ test("injectable local engine produces an isolated unvalidated patch without res
   assert.doesNotMatch(
     generatedPatch,
     /generated-secret|abcdefghijklmnopqrstuvwxyz/,
+  );
+  const report = JSON.parse(await fs.readFile(result.reportPath!, "utf8"));
+  assert.equal(report.status, "SUCCESS");
+  assert.equal(report.validation.status, "VALIDATED");
+  assert.equal(report.cloudCalls, 0);
+});
+
+test("E2E security fixture denies an unverified harness before execution", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rods-local-gate-"));
+  execFileSync("git", ["init", "-b", "main"], { cwd: root });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
+  await fs.writeFile(path.join(root, "source.ts"), "export const value = 1;\n");
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd: root });
+  let harnessExecuted = false;
+  const engine = new LocalExecutionEngine({
+    runtime: {
+      id: "verified-runtime",
+      discover: async () => ({
+        installed: true,
+        ready: true,
+        capabilities: [
+          { id: "local", label: "Local", tiers: ["simple"], powerModes: ["eco"] },
+        ],
+        diagnostics: [],
+      }),
+    },
+    harness: {
+      id: "codex",
+      discover: async () => ({ installed: true, ready: true, diagnostics: [] }),
+      execute: async () => {
+        harnessExecuted = true;
+      },
+    },
+    gate: async () => ({
+      allowed: false,
+      errorCode: "HARNESS_NOT_READY",
+      reasons: ["Codex route is unverified"],
+    }),
+    context: async () => [
+      { path: "source.ts", content: "export const value = 1;", score: 1 },
+    ],
+  });
+  await assert.rejects(
+    engine.run({ root, task: "Add a test", powerMode: "eco" }),
+    (error: unknown) =>
+      error instanceof RodsLocalError && error.code === "HARNESS_NOT_READY",
+  );
+  assert.equal(harnessExecuted, false);
+  assert.equal(
+    await fs.readFile(path.join(root, "source.ts"), "utf8"),
+    "export const value = 1;\n",
+  );
+  assert.equal(
+    execFileSync("git", ["worktree", "list", "--porcelain"], { cwd: root })
+      .toString()
+      .split("worktree ").length - 1,
+    1,
   );
 });
 

@@ -29,7 +29,7 @@ A foundation inclui `rods setup`, `rods doctor`, `rods run`, Context Engine com 
 ```text
 npm run typecheck  ✓
 npm run build      ✓
-npm test           ✓ 91/91
+npm test           ✓ 92/92
 ```
 
 ## Discovery verificado
@@ -76,7 +76,7 @@ Até existir uma interface pública e verificável que prove essas propriedades,
 | 1 | Local Compute Foundation | Concluído |
 | 2 | Harness Route Proof | Concluído — rota Codex não verificável nesta versão |
 | 3 | Local-Only Security Gate | Concluído |
-| 4A | E2E Security Infrastructure | Próximo |
+| 4A | E2E Security Infrastructure | Concluído |
 | 4B | Verified Local E2E | Bloqueado por contrato externo do Codex |
 
 O gate centralizado nega a execução antes de iniciar o harness. Com o estado
@@ -85,7 +85,9 @@ serão alterados e `cloudCalls` permanecerá zero. Quando a rota do harness for
 verificada, a política padrão ainda exigirá uma `NetworkIsolationProof` de que
 loopback está liberado e rede externa bloqueada.
 
-O PR 4A pode integrar fixture real, worktree, validação, patch, relatório e o
-gate de segurança. O PR 4B só será liberado quando uma capacidade oficial
+O PR 4A agora possui fixture E2E com repositório Git e worktree reais. O caminho
+permitido produz patch e relatório sanitizados após uma validação real; o caminho
+negado confirma `HARNESS_NOT_READY`, sem executar harness, alterar arquivos ou
+criar worktree adicional. O PR 4B só será liberado quando uma capacidade oficial
 permitir que `CodexHarness.verifyLocalRoute()` produza prova de provider,
 endpoint, modelo e rota sem cloud.

@@ -101,6 +101,10 @@ primário. O roadmap separa a infraestrutura E2E (PR 4A) do E2E local
 verificado (PR 4B): este último permanece bloqueado até o Codex expor prova
 estruturada de provider, endpoint, modelo e ausência de fallback cloud.
 
+A fixture E2E de segurança já verifica infraestrutura real — repositório Git,
+worktree isolada, patch, relatório sanitizado e validação determinística — e
+também que uma rota de harness não verificada é bloqueada antes da execução.
+
 ## Instalação
 
 ```bash
