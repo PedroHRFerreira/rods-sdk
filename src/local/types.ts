@@ -142,6 +142,26 @@ export type RuntimeVerification = {
   diagnostics: string[];
 };
 
+export type CodexLocalProvider = "ollama" | "lmstudio";
+export type VerificationState = true | false | "unknown";
+
+/**
+ * Evidence about the route selected by the execution harness.  It is separate
+ * from LocalityProof: a healthy runtime does not prove that Codex uses it.
+ */
+export type HarnessRouteProof = {
+  harness: "codex";
+  provider?: CodexLocalProvider;
+  endpoint?: string;
+  runtime?: string;
+  model?: string;
+  routeVerified: boolean;
+  cloudFallbackEnabled: VerificationState;
+  cloudCredentialsRequired: VerificationState;
+  evidence: RuntimeEvidence[];
+  diagnostics: string[];
+};
+
 export type HarnessDiscovery =
   | { installed: true; ready: true; diagnostics: string[] }
   | { installed: false; ready: false; diagnostics: string[] }

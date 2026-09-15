@@ -51,6 +51,13 @@ estiver instalado sem uma sonda estruturada oficial, o resultado correto é
 `RUNTIME_CONTRACT_UNSUPPORTED`; sem uma atestação da conexão do harness, é
 `HARNESS_NOT_READY`.
 
+O `doctor --compute` também emite `harnessRoute`. No Codex CLI atual, a opção
+oficial `--oss --local-provider ollama|lmstudio` permite escolher um provider,
+mas não há uma consulta estruturada para atestar provider ativo, endpoint,
+modelo ou fallback cloud. Assim, o relatório mantém `routeVerified: false` e
+os campos de cloud como `unknown`; o RODS não interpreta help ou configuração
+interna como prova.
+
 ### Arquitetura e decisão de segurança
 
 ```text

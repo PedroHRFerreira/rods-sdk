@@ -32,10 +32,12 @@ import { collectMachineProfile, type MachineProfile } from "../local/machine-pro
 import { OllamaRuntimeAdapter } from "../local/ollama-runtime.js";
 import { LMStudioRuntimeAdapter } from "../local/lmstudio-runtime.js";
 import { LocalRuntimeRegistry } from "../local/registry.js";
+import { CodexHarnessAdapter } from "../local/codex-harness.js";
 import type {
   DecisionTrace,
   ExecutionHarness,
   ExecutionResult,
+  HarnessRouteProof,
   LocalRuntime,
   LocalRuntimeAdapter,
   PowerMode,
@@ -668,26 +670,24 @@ function liveRuntimeRegistry(): LocalRuntimeRegistry {
   registry.register(liveMagnitude());
   return registry;
 }
-function liveCodex(): LocalHarness {
+interface CodexLocalHarness extends LocalHarness {
+  verifyLocalRoute(signal?: AbortSignal): Promise<HarnessRouteProof>;
+}
+function liveCodex(): CodexLocalHarness {
+  const adapter = new CodexHarnessAdapter(() => executableVersion("codex"));
   return {
-    id: "codex",
-    async discover() {
-      const version = await executableVersion("codex");
-      return version
-        ? {
-            installed: true,
-            ready: false,
-            diagnostics: [
-              "Harness local-runtime connection is not verified",
-              "Harness is fail-closed: Git worktree shared .git containment has not been verified",
-            ],
-          }
-        : {
-            installed: false,
-            ready: false,
-            diagnostics: ["Codex is not installed"],
-          };
+    id: adapter.id,
+    async discover(signal) {
+      const discovery = await adapter.discover(signal);
+      return {
+        ...discovery,
+        diagnostics: [
+          ...discovery.diagnostics,
+          "Harness is fail-closed: Git worktree shared .git containment has not been verified",
+        ],
+      };
     },
+    verifyLocalRoute: (signal) => adapter.verifyLocalRoute(undefined, signal),
     async execute() {
       throw new RodsLocalError(
         "HARNESS_NOT_READY",
@@ -810,6 +810,7 @@ export type ComputeDoctorReport = {
     networkIsolationChecked: false;
     e2eReady: false;
   };
+  harnessRoute: HarnessRouteProof;
 };
 
 function supportsVerification(runtime: LocalRuntime): runtime is LocalRuntimeAdapter {
@@ -818,7 +819,8 @@ function supportsVerification(runtime: LocalRuntime): runtime is LocalRuntimeAda
 
 async function computeDoctor(root: string): Promise<ComputeDoctorReport> {
   const registry = liveRuntimeRegistry();
-  const [machine, runtimes] = await Promise.all([
+  const codex = liveCodex();
+  const [machine, runtimes, harnessRoute] = await Promise.all([
     collectMachineProfile(root),
     Promise.all(
       registry.list().map(async (runtime): Promise<ComputeRuntimeReport> => {
@@ -848,6 +850,7 @@ async function computeDoctor(root: string): Promise<ComputeDoctorReport> {
         };
       }),
     ),
+    codex.verifyLocalRoute(),
   ]);
   const verified = runtimes.filter(
     (runtime) => runtime.locality === "verified-local",
@@ -862,6 +865,7 @@ async function computeDoctor(root: string): Promise<ComputeDoctorReport> {
       networkIsolationChecked: false,
       e2eReady: false,
     },
+    harnessRoute,
   };
 }
 

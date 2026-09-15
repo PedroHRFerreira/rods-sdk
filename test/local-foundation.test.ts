@@ -36,6 +36,7 @@ import { localCliError } from "../src/utils/errors.js";
 import { OllamaRuntimeAdapter } from "../src/local/ollama-runtime.js";
 import { LMStudioRuntimeAdapter } from "../src/local/lmstudio-runtime.js";
 import { collectMachineProfile } from "../src/local/machine-profile.js";
+import { CodexHarnessAdapter } from "../src/local/codex-harness.js";
 
 test("context selection honors ignore, sensitive-data, and explicit budgets", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rods-context-"));
@@ -419,6 +420,24 @@ test("machine profile is read-only and reports core capacity fields", async () =
   assert.ok(profile.memory.totalMb > 0);
   assert.ok(profile.memory.availableMb >= 0);
   assert.ok(profile.disk.availableMb >= 0);
+});
+
+test("Codex harness refuses to infer a local route from CLI availability", async () => {
+  const harness = new CodexHarnessAdapter(async () => "codex-cli 0.154.0");
+  const proof = await harness.verifyLocalRoute("ollama");
+  assert.equal(proof.harness, "codex");
+  assert.equal(proof.provider, undefined);
+  assert.equal(proof.endpoint, undefined);
+  assert.equal(proof.model, undefined);
+  assert.equal(proof.routeVerified, false);
+  assert.equal(proof.cloudFallbackEnabled, "unknown");
+  assert.equal(proof.cloudCredentialsRequired, "unknown");
+  assert.match(proof.diagnostics[0]!, /HARNESS_ROUTE_UNVERIFIED/);
+  assert.deepEqual(await harness.discover(), {
+    installed: true,
+    ready: false,
+    diagnostics: proof.diagnostics,
+  });
 });
 
 test("local-only router cannot resolve a cloud registry path", () => {

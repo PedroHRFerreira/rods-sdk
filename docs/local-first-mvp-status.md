@@ -10,6 +10,12 @@ LM Studio é descoberto e diagnosticado, mas permanece não verificável porque 
 LM Link pode rotear `localhost` para um modelo em outro dispositivo. Magnitude
 permanece experimental e inelegível para `--local-only`.
 
+O PR 2 formalizou a fronteira do Codex Harness. A versão atual do CLI anuncia
+`--oss --local-provider ollama|lmstudio`, mas não disponibiliza uma API/JSON de
+atestado da rota efetiva. Por isso `harnessRoute.routeVerified` permanece
+`false`, e fallback/credenciais cloud ficam `unknown`; o resultado seguro é
+`HARNESS_NOT_READY`.
+
 A foundation inclui `rods setup`, `rods doctor`, `rods run`, Context Engine com orçamento de contexto, filtros de segredos, runtime e harness separados, worktree isolada, patch sanitizado, validação opt-in, zero-cloud em `--local-only` e testes com doubles.
 
 ## Verificação
