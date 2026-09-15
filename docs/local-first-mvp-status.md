@@ -4,6 +4,12 @@
 
 O projeto possui uma **Local-First Foundation** implementada e validada, mas o Local-First MVP ainda não está concluído end-to-end.
 
+O PR 1 de compute está concluído: `rods doctor --compute` coleta o perfil básico
+da máquina e verifica Ollama exclusivamente por API HTTP loopback documentada.
+LM Studio é descoberto e diagnosticado, mas permanece não verificável porque o
+LM Link pode rotear `localhost` para um modelo em outro dispositivo. Magnitude
+permanece experimental e inelegível para `--local-only`.
+
 A foundation inclui `rods setup`, `rods doctor`, `rods run`, Context Engine com orçamento de contexto, filtros de segredos, runtime e harness separados, worktree isolada, patch sanitizado, validação opt-in, zero-cloud em `--local-only` e testes com doubles.
 
 ## Verificação
@@ -11,17 +17,18 @@ A foundation inclui `rods setup`, `rods doctor`, `rods run`, Context Engine com 
 ```text
 npm run typecheck  ✓
 npm run build      ✓
-npm test           ✓ 86/86
+npm test           ✓ 89/89
 ```
 
 ## Discovery verificado
 
 O discovery de 2026-09-14 foi somente leitura: nenhum modelo foi baixado, serviço iniciado ou configuração global modificada.
 
+- Ollama pode ser candidato local quando sua API loopback documentada responde e lista ao menos um modelo; essa prova ainda não verifica o Codex.
+- LM Studio é diagnosticado pela API nativa, mas não é candidato `--local-only`: LM Link pode responder em `localhost` com inferência remota.
 - Magnitude `0.0.14` expõe status de serviço, modelos e conexões, mas não um contrato estruturado documentado suficiente para automation segura.
 - A integração Magnitude → Codex depende de um comando de lançamento exibido ao usuário, sem esquema/API público para atestar conexão ou endpoint local.
-- Codex `0.154.0` lista apenas `lmstudio` e `ollama` em `--local-provider`; Magnitude não é um provider local verificável nessa interface.
-- Não há conexão Codex/Magnitude nem modelo local pronto configurados neste ambiente.
+- A ligação Codex → runtime local ainda não foi verificada neste ambiente.
 
 ## Decisão de segurança
 

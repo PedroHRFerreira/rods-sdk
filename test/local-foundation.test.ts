@@ -33,6 +33,9 @@ import {
 } from "../src/local/harness-sandbox-policy.js";
 import { LocalExecutionEngine } from "../src/commands/local.js";
 import { localCliError } from "../src/utils/errors.js";
+import { OllamaRuntimeAdapter } from "../src/local/ollama-runtime.js";
+import { LMStudioRuntimeAdapter } from "../src/local/lmstudio-runtime.js";
+import { collectMachineProfile } from "../src/local/machine-profile.js";
 
 test("context selection honors ignore, sensitive-data, and explicit budgets", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rods-context-"));
@@ -354,6 +357,68 @@ test("registries isolate local runtime and harness registrations", () => {
       error instanceof RodsLocalError &&
       error.code === "PROVIDER_NOT_AVAILABLE",
   );
+});
+
+test("Ollama adapter accepts only documented loopback discovery with a local model", async () => {
+  const runtime = new OllamaRuntimeAdapter({
+    getJson: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ models: [{ name: "qwen2.5-coder:7b" }] }),
+    }),
+  });
+  const verification = await runtime.verify();
+  assert.equal(verification.locality, "verified-local");
+  assert.deepEqual(verification.modelNames, ["qwen2.5-coder:7b"]);
+  assert.equal(verification.proof?.loopback, true);
+  assert.equal(verification.proof?.modelVerified, true);
+  assert.deepEqual(await runtime.discover(), {
+    installed: true,
+    ready: true,
+    capabilities: [],
+    diagnostics: [],
+  });
+  const remote = new OllamaRuntimeAdapter({
+    endpoint: "https://example.test/api/tags",
+    getJson: async () => {
+      throw new Error("must not request a remote endpoint");
+    },
+  });
+  assert.equal((await remote.verify()).locality, "remote");
+});
+
+test("LM Studio adapter stays unverified because localhost can route through LM Link", async () => {
+  const runtime = new LMStudioRuntimeAdapter({
+    getJson: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        models: [
+          { key: "local-coder", type: "llm", loaded_instances: [{ id: "one" }] },
+        ],
+      }),
+    }),
+  });
+  const verification = await runtime.verify();
+  assert.equal(verification.reachable, true);
+  assert.equal(verification.locality, "unverified");
+  assert.deepEqual(verification.modelNames, ["local-coder"]);
+  assert.deepEqual(await runtime.discover(), {
+    installed: true,
+    ready: false,
+    capabilities: [],
+    diagnostics: [
+      "LM Studio locality is unverified: LM Link can serve a remote model through localhost",
+    ],
+  });
+});
+
+test("machine profile is read-only and reports core capacity fields", async () => {
+  const profile = await collectMachineProfile(process.cwd());
+  assert.ok(profile.cpu.cores > 0);
+  assert.ok(profile.memory.totalMb > 0);
+  assert.ok(profile.memory.availableMb >= 0);
+  assert.ok(profile.disk.availableMb >= 0);
 });
 
 test("local-only router cannot resolve a cloud registry path", () => {

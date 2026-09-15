@@ -15,9 +15,10 @@ O Rods SDK entrega uma camada operacional pequena e auditável para agentes:
 ### Estado atual
 
 O projeto possui uma **Local-First Foundation** implementada e validada. O
-**Local-First MVP E2E não está concluído**: a rota real `Codex → Magnitude →
-modelo local` permanece intencionalmente desabilitada até que possa ser
-atestada por um contrato público e estruturado.
+**Local-First MVP E2E não está concluído**: a rota real `Codex Harness →
+runtime local verificado → modelo local` permanece intencionalmente
+desabilitada até que a rota do harness também possa ser atestada por um
+contrato público e estruturado.
 
 A foundation já fornece `rods setup`, `rods doctor` e `rods run`; seleção de
 contexto com orçamento; filtros de segredos e symlinks; worktree isolada;
@@ -25,7 +26,7 @@ sanitização de artifacts; subprocessos controlados; validação opt-in; erros
 estruturados; e roteamento `--local-only` fail-closed com `cloudCalls = 0`.
 
 Na validação de 2026-09-14, `npm run typecheck`, `npm run build` e a suíte de
-86 testes passaram. O pacote 0.1.17 também foi empacotado e instalado em um
+89 testes passaram. O pacote 0.1.17 também foi empacotado e instalado em um
 diretório limpo, com seus binários funcionando. Isso não é evidência de uma
 execução real por Magnitude e Codex.
 
@@ -40,7 +41,8 @@ por `@modelcontextprotocol/sdk`.
 | ----------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Context Engine, governança, Q&A, adapters e CLI | Disponível                                       | Cobertos pela suíte e pelo smoke test de instalação.                                                                                                           |
 | `rods flow run` com Codex, Claude ou Gemini     | Implementado, mas precisa de ambiente do usuário | A integração foi exercitada com CLIs falsas nos testes. O usuário deve configurar CLIs autenticadas, modelos e permissões antes de uma primeira execução real. |
-| `rods run --local-only`                         | Bloqueado de propósito                           | O runtime Magnitude e a ligação Codex → runtime local não possuem contrato verificável integrado.                                                              |
+| `rods doctor --compute`                         | Disponível                                       | Descobre CPU, RAM, disco e verifica Ollama por endpoint loopback documentado; LM Studio é diagnosticado, mas fica não verificado enquanto LM Link puder rotear remotamente. |
+| `rods run --local-only`                         | Bloqueado de propósito                           | Ainda falta uma prova verificável da ligação Codex → runtime local; runtime saudável não implica harness saudável.                                             |
 | Fallback cloud em Local-First                   | Não existe                                       | `--cloud` e `--hybrid` retornam `FEATURE_NOT_AVAILABLE`.                                                                                                       |
 
 O discovery atual não usa parsing frágil de texto humano, flags JSON não
@@ -202,13 +204,15 @@ Esta trilha configura defaults sem instalar softwares externos:
 
 ```bash
 rods setup /caminho/para/meu-projeto
-rods doctor /caminho/para/meu-projeto --json
+rods doctor /caminho/para/meu-projeto --compute --json
 ```
 
-`doctor` verifica Git, Context Engine, runtime Magnitude, modelos locais,
-Codex e permissões de validação. Hoje ele retorna código de saída `1` enquanto
-não houver uma sonda estruturada e oficial que comprove o runtime Magnitude, o
-modelo local, a conexão Codex → Magnitude e o isolamento Git. Nesse estado,
+`doctor --compute` verifica Git, Context Engine, capacidade básica da máquina,
+Ollama por API local documentada, LM Studio em modo diagnóstico (LM Link pode
+roter para outro dispositivo), Magnitude experimental, Codex e permissões de
+validação. Hoje ele retorna código de saída `1` enquanto
+não houver uma prova estruturada da conexão Codex → runtime local e do
+isolamento Git. Nesse estado,
 `rods run "tarefa" --local-only` falha de forma segura; `--cloud` e `--hybrid`
 são sempre recusados. Isso é uma proteção, não um fallback.
 
@@ -350,7 +354,7 @@ rods flow run <task> [--mode <agent|developer+reviewer>] [--root <path>] [--json
 rods flow findings --file <path> [--project <name>] [--json]
 rods hook run --target codex|claude
 rods setup [path] [--json]
-rods doctor [path] [--json]
+rods doctor [path] [--compute] [--json]
 rods run <task> --local-only [--root <path>] [--dry-run] [--explain] [--power eco|balanced|performance|max|auto] [--json]
 ```
 

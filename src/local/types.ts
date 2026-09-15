@@ -112,6 +112,36 @@ export type LocalRuntimeDiscovery =
       diagnostics: string[];
     };
 
+/** Evidence collected from a runtime's documented, structured interface. */
+export type RuntimeEvidence = {
+  source: string;
+  detail: string;
+};
+
+/**
+ * This proves only the runtime and model route.  A future HarnessRouteProof
+ * must separately prove that Codex is actually using this route.
+ */
+export type LocalityProof = {
+  runtime: string;
+  endpoint: string;
+  loopback: boolean;
+  model?: string;
+  runtimeVerified: boolean;
+  modelVerified: boolean;
+  verifiedAt: string;
+  evidence: RuntimeEvidence[];
+};
+
+export type RuntimeVerification = {
+  /** The adapter's documented endpoint answered, independent of locality. */
+  reachable: boolean;
+  locality: "verified-local" | "unverified" | "remote";
+  modelNames: string[];
+  proof?: LocalityProof;
+  diagnostics: string[];
+};
+
 export type HarnessDiscovery =
   | { installed: true; ready: true; diagnostics: string[] }
   | { installed: false; ready: false; diagnostics: string[] }
@@ -157,6 +187,11 @@ export function assertHarnessDiscovery(
 export interface LocalRuntime {
   readonly id: string;
   discover(signal?: AbortSignal): Promise<LocalRuntimeDiscovery>;
+}
+
+/** A local runtime with a documented route verification operation. */
+export interface LocalRuntimeAdapter extends LocalRuntime {
+  verify(signal?: AbortSignal): Promise<RuntimeVerification>;
 }
 export interface ExecutionHarness {
   readonly id: string;

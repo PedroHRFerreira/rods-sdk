@@ -28,11 +28,16 @@ import {
   sanitizeWorktree,
 } from "../local/worktree-sanitizer.js";
 import { resolveLocalOnlyRoute } from "../local/local-only-router.js";
+import { collectMachineProfile, type MachineProfile } from "../local/machine-profile.js";
+import { OllamaRuntimeAdapter } from "../local/ollama-runtime.js";
+import { LMStudioRuntimeAdapter } from "../local/lmstudio-runtime.js";
+import { LocalRuntimeRegistry } from "../local/registry.js";
 import type {
   DecisionTrace,
   ExecutionHarness,
   ExecutionResult,
   LocalRuntime,
+  LocalRuntimeAdapter,
   PowerMode,
   RoutingDecision,
   TaskComplexity,
@@ -654,6 +659,15 @@ function liveMagnitude(): LocalRuntime {
     },
   };
 }
+
+/** Discovery-only registry.  Magnitude remains intentionally unverified. */
+function liveRuntimeRegistry(): LocalRuntimeRegistry {
+  const registry = new LocalRuntimeRegistry();
+  registry.register(new OllamaRuntimeAdapter());
+  registry.register(new LMStudioRuntimeAdapter());
+  registry.register(liveMagnitude());
+  return registry;
+}
 function liveCodex(): LocalHarness {
   return {
     id: "codex",
@@ -703,9 +717,12 @@ export function registerLocalCommands(program: Command): void {
     .command("doctor")
     .argument("[path]", "project root", ".")
     .option("--json")
+    .option("--compute", "include machine and verified local runtime discovery")
     .description("Diagnose independent Local-First prerequisites")
-    .action(async (target: string) => {
-      const report = await localDoctor(path.resolve(target));
+    .action(async (target: string, options: { compute?: boolean }) => {
+      const report = await localDoctor(path.resolve(target), {
+        compute: options.compute,
+      });
       console.log(JSON.stringify(report, null, 2));
       if (!report.ready) process.exitCode = 1;
     });
@@ -773,7 +790,82 @@ export function registerLocalCommands(program: Command): void {
     );
 }
 
-export async function localDoctor(root: string): Promise<{
+export type ComputeRuntimeReport = {
+  id: string;
+  installed: boolean;
+  ready: boolean;
+  locality: "verified-local" | "unverified" | "remote";
+  models: string[];
+  proof?: Record<string, unknown>;
+  experimental: boolean;
+  diagnostics: string[];
+};
+export type ComputeDoctorReport = {
+  machine: MachineProfile;
+  runtimes: ComputeRuntimeReport[];
+  localOnly: {
+    runtimeAvailable: boolean;
+    localModelAvailable: boolean;
+    codexRouteVerified: false;
+    networkIsolationChecked: false;
+    e2eReady: false;
+  };
+};
+
+function supportsVerification(runtime: LocalRuntime): runtime is LocalRuntimeAdapter {
+  return "verify" in runtime && typeof runtime.verify === "function";
+}
+
+async function computeDoctor(root: string): Promise<ComputeDoctorReport> {
+  const registry = liveRuntimeRegistry();
+  const [machine, runtimes] = await Promise.all([
+    collectMachineProfile(root),
+    Promise.all(
+      registry.list().map(async (runtime): Promise<ComputeRuntimeReport> => {
+        if (!supportsVerification(runtime)) {
+          const discovery = await runtime.discover();
+          return {
+            id: runtime.id,
+            installed: discovery.installed,
+            ready: discovery.ready,
+            locality: "unverified",
+            models: [],
+            experimental: true,
+            diagnostics: discovery.diagnostics,
+          };
+        }
+        const verification = await runtime.verify();
+        const discovery = await runtime.discover();
+        return {
+          id: runtime.id,
+          installed: discovery.installed,
+          ready: discovery.ready,
+          locality: verification.locality,
+          models: verification.modelNames,
+          proof: verification.proof,
+          experimental: false,
+          diagnostics: verification.diagnostics,
+        };
+      }),
+    ),
+  ]);
+  const verified = runtimes.filter(
+    (runtime) => runtime.locality === "verified-local",
+  );
+  return {
+    machine,
+    runtimes,
+    localOnly: {
+      runtimeAvailable: verified.length > 0,
+      localModelAvailable: verified.some((runtime) => runtime.models.length > 0),
+      codexRouteVerified: false,
+      networkIsolationChecked: false,
+      e2eReady: false,
+    },
+  };
+}
+
+export async function localDoctor(root: string, options: { compute?: boolean } = {}): Promise<{
   ready: boolean;
   core: Record<string, unknown>;
   localRuntime: Record<string, unknown>;
@@ -781,6 +873,7 @@ export async function localDoctor(root: string): Promise<{
   harness: Record<string, unknown>;
   workspace: Record<string, unknown>;
   validation: Record<string, unknown>;
+  compute?: ComputeDoctorReport;
 }> {
   const runtime = await liveMagnitude().discover();
   const harness = await liveCodex().discover();
@@ -814,7 +907,16 @@ export async function localDoctor(root: string): Promise<{
     }
   })();
   const gitReady = await isGit(root);
-  return {
+  const report: {
+    ready: boolean;
+    core: Record<string, unknown>;
+    localRuntime: Record<string, unknown>;
+    localModels: Record<string, unknown>;
+    harness: Record<string, unknown>;
+    workspace: Record<string, unknown>;
+    validation: Record<string, unknown>;
+    compute?: ComputeDoctorReport;
+  } = {
     ready: false,
     core: { node: process.version, git: gitReady, contextEngine: indexed },
     localRuntime: {
@@ -844,4 +946,6 @@ export async function localDoctor(root: string): Promise<{
       configPath: localConfig.path,
     },
   };
+  if (options.compute) report.compute = await computeDoctor(root);
+  return report;
 }
