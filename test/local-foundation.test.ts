@@ -38,6 +38,7 @@ import { LMStudioRuntimeAdapter } from "../src/local/lmstudio-runtime.js";
 import { collectMachineProfile } from "../src/local/machine-profile.js";
 import { CodexHarnessAdapter } from "../src/local/codex-harness.js";
 import { LinuxNetworkConfinement } from "../src/local/linux-network-confinement.js";
+import { evaluateLocalExecutionCapabilities } from "../src/local/execution-capabilities.js";
 import {
   buildEffectiveRouteProof,
   confinementFromIsolation,
@@ -740,18 +741,19 @@ test("Linux network confinement wraps a process with a private loopback runtime 
       timeoutMs: 1_000,
     },
   );
-  assert.equal(requests.length, 2);
-  assert.deepEqual(requests[0]!.args?.slice(0, 5), [
+  assert.equal(requests.length, 3);
+  assert.deepEqual(requests[0]!.args, ["--version"]);
+  assert.deepEqual(requests[1]!.args?.slice(0, 5), [
     "--unshare-net",
     "--die-with-parent",
     "--",
     "/usr/bin/ip",
     "link",
   ]);
-  assert.equal(requests[1]!.command, "bwrap");
-  assert.ok(requests[1]!.args?.includes("--unshare-net"));
-  assert.ok(requests[1]!.args?.includes("--clearenv"));
-  assert.ok(requests[1]!.args?.includes("/run/rods/runtime.sock"));
+  assert.equal(requests[2]!.command, "bwrap");
+  assert.ok(requests[2]!.args?.includes("--unshare-net"));
+  assert.ok(requests[2]!.args?.includes("--clearenv"));
+  assert.ok(requests[2]!.args?.includes("/run/rods/runtime.sock"));
   assert.deepEqual(confined.proof.allowedEndpoints, ["http://127.0.0.1:11434/v1"]);
   assert.equal(confined.proof.externalConnectionsSucceeded, 0);
   assert.equal(confined.proof.externalNetworkBlocked, true);
@@ -784,7 +786,64 @@ test("Linux network confinement fails closed when unavailable or policy is broad
     (error: unknown) => error instanceof RodsLocalError && error.code === "CONFIGURATION_ERROR",
   );
   const nonLinux = new LinuxNetworkConfinement({ run: async () => resultForTest() }, "darwin");
-  assert.equal((await nonLinux.probe()).supported, false);
+  assert.deepEqual(await nonLinux.probe(), {
+    supported: false,
+    backend: "bubblewrap",
+    installed: false,
+    usable: false,
+    verified: false,
+    diagnostics: ["Linux network confinement is unavailable on this platform"],
+  });
+});
+
+test("local execution capabilities never equate a local model with strict Local-Only", () => {
+  const runtime = {
+    runtime: "ollama",
+    endpoint: "http://127.0.0.1:11434",
+    loopback: true,
+    model: "qwen3-coder",
+    runtimeVerified: true,
+    modelVerified: true,
+    verifiedAt: "2026-09-14T00:00:00.000Z",
+    evidence: [],
+  } as const;
+  const unavailable = evaluateLocalExecutionCapabilities({
+    platform: "linux",
+    runtimeProof: runtime,
+    confinement: {
+      supported: false,
+      backend: "bubblewrap",
+      installed: true,
+      usable: false,
+      verified: false,
+      diagnostics: ["kernel denied namespace"],
+    },
+  });
+  assert.equal(unavailable.localExecution, "available");
+  assert.equal(unavailable.strictLocalOnly, "unavailable");
+  assert.deepEqual(unavailable.confinement, {
+    backend: "bubblewrap",
+    installed: true,
+    usable: false,
+    verified: false,
+  });
+  assert.ok(unavailable.reasons.some((reason) => reason.startsWith("NETWORK_ISOLATION_UNAVAILABLE")));
+
+  const unsupported = evaluateLocalExecutionCapabilities({
+    platform: "darwin",
+    runtimeProof: runtime,
+    confinement: {
+      supported: false,
+      backend: "bubblewrap",
+      installed: false,
+      usable: false,
+      verified: false,
+      diagnostics: [],
+    },
+  });
+  assert.equal(unsupported.localExecution, "available");
+  assert.equal(unsupported.strictLocalOnly, "unsupported");
+  assert.ok(unsupported.reasons.some((reason) => reason.startsWith("NETWORK_ISOLATION_UNAVAILABLE")));
 });
 
 function resultForTest() {

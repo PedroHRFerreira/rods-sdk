@@ -88,11 +88,10 @@ function evaluateLegacyLocalOnlyGate(
       ],
     };
   if (
-    input.networkPolicy === "require-isolation" &&
-    (!input.networkProof.supported ||
-      !input.networkProof.enabled ||
-      !input.networkProof.loopbackAllowed ||
-      !input.networkProof.externalNetworkBlocked)
+    !input.networkProof.supported ||
+    !input.networkProof.enabled ||
+    !input.networkProof.loopbackAllowed ||
+    !input.networkProof.externalNetworkBlocked
   )
     return {
       allowed: false,

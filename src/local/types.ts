@@ -144,7 +144,8 @@ export type RuntimeVerification = {
 
 export type CodexLocalProvider = "ollama" | "lmstudio";
 export type VerificationState = true | false | "unknown";
-export type LocalOnlyNetworkPolicy = "require-isolation" | "allow-unisolated";
+/** `--local-only` is always strict; non-strict local use belongs to another mode. */
+export type LocalOnlyNetworkPolicy = "require-isolation";
 
 export type ExecutionLocality =
   | "same-machine"
@@ -228,6 +229,33 @@ export type LocalOnlyPolicy = {
   requireEffectiveRouteProof: boolean;
   requireExternalNetworkBlocked: boolean;
   allowLocalNetworkRuntime: boolean;
+};
+
+/**
+ * Separates ordinary local-runtime availability from the stricter guarantee
+ * required by `--local-only`. A local model must never be presented as proof
+ * that outbound network access is blocked.
+ */
+export type LocalExecutionCapabilities = {
+  localExecution: "available" | "unavailable";
+  strictLocalOnly: "available" | "unavailable" | "unsupported";
+  confinement?: {
+    backend: string;
+    installed: boolean;
+    usable: boolean;
+    verified: boolean;
+  };
+  reasons: string[];
+};
+
+/** Result of a platform-specific confinement backend capability probe. */
+export type NetworkConfinementCapability = {
+  supported: boolean;
+  backend: string;
+  installed: boolean;
+  usable: boolean;
+  verified: boolean;
+  diagnostics: string[];
 };
 
 /** OS-level evidence; this is intentionally distinct from a harness sandbox. */

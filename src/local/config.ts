@@ -244,7 +244,7 @@ function validateLocalFirst(
     invalid("localFirst.harness must be a non-empty string");
   if (
     config.localOnlyNetworkPolicy !== undefined &&
-    !["require-isolation", "allow-unisolated"].includes(
+    !["require-isolation"].includes(
       config.localOnlyNetworkPolicy as string,
     )
   )

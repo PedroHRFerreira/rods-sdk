@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { RodsLocalError } from "./errors.js";
 import { ProcessRunner, type ProcessRequest, type ProcessResult } from "./process-runner.js";
-import type { NetworkConfinementProof, NetworkEvidence } from "./types.js";
+import type {
+  NetworkConfinementCapability,
+  NetworkConfinementProof,
+  NetworkEvidence,
+} from "./types.js";
 
 export type NetworkPolicy = {
   /** The only host endpoint to which the confinement gateway may connect. */
@@ -19,12 +23,6 @@ export type ProcessCommand = Pick<
 > & {
   /** Executables or package roots outside the worktree that must be readable. */
   readOnlyPaths?: string[];
-};
-
-export type NetworkConfinementCapability = {
-  supported: boolean;
-  mechanism?: string;
-  diagnostics: string[];
 };
 
 export type ConfinedProcessResult = {
@@ -75,8 +73,41 @@ export class LinuxNetworkConfinement implements NetworkConfinement {
     if (this.platform !== "linux")
       return {
         supported: false,
+        backend: "bubblewrap",
+        installed: false,
+        usable: false,
+        verified: false,
         diagnostics: ["Linux network confinement is unavailable on this platform"],
       };
+    try {
+      const installation = await this.runner.run({
+        command: BWRAP,
+        args: ["--version"],
+        timeoutMs: 2_000,
+        signal,
+        maxOutputBytes: 8 * 1024,
+      });
+      if (installation.exitCode !== 0)
+        return {
+          supported: false,
+          backend: "bubblewrap",
+          installed: false,
+          usable: false,
+          verified: false,
+          diagnostics: ["bubblewrap is not installed or cannot be executed"],
+        };
+    } catch (error) {
+      return {
+        supported: false,
+        backend: "bubblewrap",
+        installed: false,
+        usable: false,
+        verified: false,
+        diagnostics: [
+          `bubblewrap installation probe failed: ${error instanceof Error ? error.message : "unknown error"}`,
+        ],
+      };
+    }
     try {
       const result = await this.runner.run({
         command: BWRAP,
@@ -88,18 +119,29 @@ export class LinuxNetworkConfinement implements NetworkConfinement {
       if (result.exitCode === 0)
         return {
           supported: true,
-          mechanism: "bubblewrap-network-namespace",
+          backend: "bubblewrap",
+          installed: true,
+          usable: true,
+          verified: true,
           diagnostics: ["bubblewrap created an isolated namespace with loopback"],
         };
       return {
         supported: false,
+        backend: "bubblewrap",
+        installed: true,
+        usable: false,
+        verified: false,
         diagnostics: ["bubblewrap could not create an isolated loopback network namespace"],
       };
     } catch (error) {
       return {
         supported: false,
+        backend: "bubblewrap",
+        installed: true,
+        usable: false,
+        verified: false,
         diagnostics: [
-          `bubblewrap confinement probe failed: ${error instanceof Error ? error.message : "unknown error"}`,
+          `bubblewrap network-namespace probe failed: ${error instanceof Error ? error.message : "unknown error"}`,
         ],
       };
     }
@@ -142,7 +184,7 @@ export class LinuxNetworkConfinement implements NetworkConfinement {
         proof: {
           supported: true,
           enabled: true,
-          mechanism: capability.mechanism ?? "bubblewrap-network-namespace",
+          mechanism: "bubblewrap-network-namespace",
           externalNetworkBlocked: true,
           loopbackAllowed: true,
           allowedEndpoints: policy.allowedEndpoints,

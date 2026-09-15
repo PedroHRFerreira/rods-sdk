@@ -60,10 +60,10 @@ interna como prova.
 
 `--local-only` passa pelo `LocalOnlyGate`, a única autoridade que pode permitir
 o início do harness. Ele exige localidade e modelo verificados, rota Codex
-verificada, fallback e credenciais cloud comprovadamente ausentes e, por padrão,
-isolamento de rede no SO. A política `localFirst.localOnlyNetworkPolicy` usa
-`require-isolation` por padrão; `allow-unisolated` é uma escolha explícita para
-plataformas onde o isolamento não pode ser imposto.
+verificada, fallback e credenciais cloud comprovadamente ausentes e isolamento
+de rede no SO. `--local-only` é sempre estrito: quando a plataforma não puder
+impor o confinamento, retorna `NETWORK_ISOLATION_UNAVAILABLE`; uso local sem
+essa garantia pertence a um modo não estrito futuro.
 
 ### Arquitetura e decisão de segurança
 

@@ -33,6 +33,8 @@ import { OllamaRuntimeAdapter } from "../local/ollama-runtime.js";
 import { LMStudioRuntimeAdapter } from "../local/lmstudio-runtime.js";
 import { LocalRuntimeRegistry } from "../local/registry.js";
 import { CodexHarnessAdapter } from "../local/codex-harness.js";
+import { LinuxNetworkConfinement } from "../local/linux-network-confinement.js";
+import { evaluateLocalExecutionCapabilities } from "../local/execution-capabilities.js";
 import {
   evaluateLocalOnlyGate,
   UNSUPPORTED_NETWORK_ISOLATION,
@@ -43,8 +45,11 @@ import type {
   ExecutionResult,
   HarnessRouteProof,
   LocalityProof,
+  LocalExecutionCapabilities,
   LocalOnlyGateDecision,
   LocalOnlyNetworkPolicy,
+  NetworkConfinementCapability,
+  NetworkIsolationProof,
   LocalRuntime,
   LocalRuntimeAdapter,
   PowerMode,
@@ -838,12 +843,14 @@ export type ComputeDoctorReport = {
   localOnly: {
     runtimeAvailable: boolean;
     localModelAvailable: boolean;
-    codexRouteVerified: false;
-    networkIsolationChecked: false;
+    codexRouteVerified: boolean;
+    networkIsolationChecked: boolean;
     e2eReady: false;
   };
   harnessRoute: HarnessRouteProof;
-  networkIsolation: typeof UNSUPPORTED_NETWORK_ISOLATION;
+  networkIsolation: NetworkIsolationProof;
+  networkConfinement: NetworkConfinementCapability;
+  capabilities: LocalExecutionCapabilities;
   gate: LocalOnlyGateDecision;
 };
 
@@ -857,7 +864,8 @@ async function computeDoctor(
 ): Promise<ComputeDoctorReport> {
   const registry = liveRuntimeRegistry();
   const codex = liveCodex();
-  const [machine, runtimes, harnessRoute] = await Promise.all([
+  const confinement = new LinuxNetworkConfinement();
+  const [machine, runtimes, harnessRoute, networkConfinement] = await Promise.all([
     collectMachineProfile(root),
     Promise.all(
       registry.list().map(async (runtime): Promise<ComputeRuntimeReport> => {
@@ -888,11 +896,20 @@ async function computeDoctor(
       }),
     ),
     codex.verifyLocalRoute(),
+    confinement.probe(),
   ]);
   const verified = runtimes.filter(
     (runtime) => runtime.locality === "verified-local",
   );
-  const networkIsolation = UNSUPPORTED_NETWORK_ISOLATION;
+  // Capability detection is not execution proof: no process is confined by
+  // doctor, so this remains disabled until `run` actually activates it.
+  const networkIsolation: NetworkIsolationProof = {
+    supported: networkConfinement.supported,
+    enabled: false,
+    loopbackAllowed: false,
+    externalNetworkBlocked: false,
+    mechanism: networkConfinement.backend,
+  };
   const gate = evaluateLocalOnlyGate({
     localityProof: verified[0]?.proof,
     harnessProof: harnessRoute,
@@ -905,12 +922,19 @@ async function computeDoctor(
     localOnly: {
       runtimeAvailable: verified.length > 0,
       localModelAvailable: verified.some((runtime) => runtime.models.length > 0),
-      codexRouteVerified: false,
-      networkIsolationChecked: false,
+      codexRouteVerified: harnessRoute.routeVerified,
+      networkIsolationChecked: true,
       e2eReady: false,
     },
     harnessRoute,
     networkIsolation,
+    networkConfinement,
+    capabilities: evaluateLocalExecutionCapabilities({
+      platform: machine.os.platform,
+      runtimeProof: verified[0]?.proof,
+      harnessRoute,
+      confinement: networkConfinement,
+    }),
     gate,
   };
 }

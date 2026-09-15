@@ -79,6 +79,7 @@ Até existir uma interface pública e verificável que prove essas propriedades,
 | 4A | E2E Security Infrastructure | Concluído |
 | 4B.1 | Effective Route Contract | Concluído — contratos e gate composto |
 | 4B.2 | Linux Network Confinement | Concluído — `bwrap` + gateway loopback privado |
+| 4B.2.1 | Platform capability reporting | Concluído — `doctor --compute` separa execução local de `--local-only` estrito |
 | 4B.3 | OpenCode Confinement Evaluation | Bloqueado no ambiente atual — confinamento Linux indisponível e Ollama ausente |
 | 4B.4 | Verified Local E2E | Dependente de 4B.3 |
 
@@ -182,3 +183,26 @@ Nenhum processo OpenCode foi iniciado, nenhuma inferência foi tentada, nenhuma
 worktree foi criada e conexões externas bem-sucedidas permanecem zero. O PR
 4B.4 continua bloqueado até uma máquina Linux com suporte efetivo ao namespace
 e um Ollama com modelo local estejam disponíveis para o teste real.
+
+## Modos e capacidade por plataforma
+
+O produto distingue três intenções: `NORMAL` (local ou cloud, quando esses
+fluxos existirem), `LOCAL_PREFERRED` (prioriza runtime local sem prometer
+isolamento) e `LOCAL_ONLY` (a garantia estrita de `--local-only`). Somente o
+último exige confinamento de rede verificável.
+
+`rods doctor --compute` agora emite `capabilities` para evitar que um runtime
+saudável seja apresentado como proteção contra cloud:
+
+```text
+localExecution    available | unavailable
+strictLocalOnly   available | unavailable | unsupported
+```
+
+No Linux, `strictLocalOnly` é `available` somente com `bubblewrap` instalado,
+capaz de criar o namespace e verificado, além das demais provas de runtime,
+harness e rota efetiva. Sem esse backend ou sem suporte do kernel, é
+`unavailable` e `rods run --local-only` deve falhar com
+`NETWORK_ISOLATION_UNAVAILABLE`. No macOS e no Windows, execução local poderá
+existir, mas o confinamento estrito ainda é `unsupported`; o RODS não finge
+compatibilidade até existir um backend verificado para cada plataforma.

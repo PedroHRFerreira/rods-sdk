@@ -17,4 +17,6 @@
 - Network confinement must prevent, not merely observe, outbound traffic; it must allow only the verified local runtime endpoint and require zero successful external connections.
 - Implement confinement per platform and fail closed where it is unavailable; Linux is the first supported target.
 - Linux confinement must use an OS-enforced private network namespace and a RODS-controlled gateway fixed to the single verified loopback runtime endpoint; broad endpoint allowlists are forbidden.
+- Expose `NORMAL`, `LOCAL_PREFERRED`, and strict `LOCAL_ONLY` as distinct modes: only strict `--local-only` promises OS-enforced external-network blocking.
+- Report local-runtime availability and strict `--local-only` availability separately. On a platform without a verified confinement backend, `--local-only` must fail closed with `NETWORK_ISOLATION_UNAVAILABLE`; Linux support depends on a usable backend and compatible kernel, while macOS and Windows are currently unsupported for strict confinement.
 - When an implementation phase is correct and validated, always create its commit and proceed directly to the next planned phase.
