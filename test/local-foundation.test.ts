@@ -37,6 +37,7 @@ import { OllamaRuntimeAdapter } from "../src/local/ollama-runtime.js";
 import { LMStudioRuntimeAdapter } from "../src/local/lmstudio-runtime.js";
 import { collectMachineProfile } from "../src/local/machine-profile.js";
 import { CodexHarnessAdapter } from "../src/local/codex-harness.js";
+import { LinuxNetworkConfinement } from "../src/local/linux-network-confinement.js";
 import {
   buildEffectiveRouteProof,
   confinementFromIsolation,
@@ -706,6 +707,97 @@ test("effective local-only gate fails closed for every incomplete proof", () => 
     Number.POSITIVE_INFINITY,
   );
 });
+
+test("Linux network confinement wraps a process with a private loopback runtime gateway", async () => {
+  const requests: Array<{ command: string; args?: string[] }> = [];
+  const result = {
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    signal: null,
+    durationMs: 1,
+    timedOut: false,
+    outputTruncated: false,
+  } as const;
+  const confinement = new LinuxNetworkConfinement(
+    {
+      run: async (request) => {
+        requests.push({ command: request.command, args: request.args });
+        return result;
+      },
+    },
+    "linux",
+  );
+  const confined = await confinement.run(
+    {
+      runtimeEndpoint: "http://127.0.0.1:11434/v1",
+      allowedEndpoints: ["http://127.0.0.1:11434/v1"],
+    },
+    {
+      command: process.execPath,
+      args: ["--version"],
+      cwd: process.cwd(),
+      timeoutMs: 1_000,
+    },
+  );
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0]!.args?.slice(0, 5), [
+    "--unshare-net",
+    "--die-with-parent",
+    "--",
+    "/usr/bin/ip",
+    "link",
+  ]);
+  assert.equal(requests[1]!.command, "bwrap");
+  assert.ok(requests[1]!.args?.includes("--unshare-net"));
+  assert.ok(requests[1]!.args?.includes("--clearenv"));
+  assert.ok(requests[1]!.args?.includes("/run/rods/runtime.sock"));
+  assert.deepEqual(confined.proof.allowedEndpoints, ["http://127.0.0.1:11434/v1"]);
+  assert.equal(confined.proof.externalConnectionsSucceeded, 0);
+  assert.equal(confined.proof.externalNetworkBlocked, true);
+});
+
+test("Linux network confinement fails closed when unavailable or policy is broad", async () => {
+  const failed = new LinuxNetworkConfinement(
+    { run: async () => ({ stdout: "", stderr: "", exitCode: 1, signal: null, durationMs: 1, timedOut: false, outputTruncated: false }) },
+    "linux",
+  );
+  await assert.rejects(
+    failed.run(
+      { runtimeEndpoint: "http://127.0.0.1:11434", allowedEndpoints: ["http://127.0.0.1:11434"] },
+      { command: process.execPath, cwd: process.cwd(), timeoutMs: 1_000 },
+    ),
+    (error: unknown) => error instanceof RodsLocalError && error.code === "NETWORK_ISOLATION_UNAVAILABLE",
+  );
+  const available = new LinuxNetworkConfinement(
+    { run: async () => ({ stdout: "", stderr: "", exitCode: 0, signal: null, durationMs: 1, timedOut: false, outputTruncated: false }) },
+    "linux",
+  );
+  await assert.rejects(
+    available.run(
+      {
+        runtimeEndpoint: "http://127.0.0.1:11434",
+        allowedEndpoints: ["http://127.0.0.1:11434", "http://127.0.0.1:9999"],
+      },
+      { command: process.execPath, cwd: process.cwd(), timeoutMs: 1_000 },
+    ),
+    (error: unknown) => error instanceof RodsLocalError && error.code === "CONFIGURATION_ERROR",
+  );
+  const nonLinux = new LinuxNetworkConfinement({ run: async () => resultForTest() }, "darwin");
+  assert.equal((await nonLinux.probe()).supported, false);
+});
+
+function resultForTest() {
+  return {
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    signal: null,
+    durationMs: 1,
+    timedOut: false,
+    outputTruncated: false,
+  } as const;
+}
 
 test("local-only router cannot resolve a cloud registry path", () => {
   let cloudResolved = false;

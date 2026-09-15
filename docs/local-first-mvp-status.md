@@ -78,7 +78,7 @@ Até existir uma interface pública e verificável que prove essas propriedades,
 | 3 | Local-Only Security Gate | Concluído |
 | 4A | E2E Security Infrastructure | Concluído |
 | 4B.1 | Effective Route Contract | Concluído — contratos e gate composto |
-| 4B.2 | Linux Network Confinement | Próximo |
+| 4B.2 | Linux Network Confinement | Concluído — `bwrap` + gateway loopback privado |
 | 4B.3 | OpenCode Confinement Evaluation | Dependente de 4B.2 e Ollama real |
 | 4B.4 | Verified Local E2E | Dependente de 4B.3 |
 
@@ -155,3 +155,18 @@ tipada para essa prova composta e continua negando qualquer estado incompleto.
 O próximo PR implementará apenas `LinuxNetworkConfinement`. Até que ele exista
 e o experimento real OpenCode + Ollama o aprove, OpenCode permanece inelegível
 para `--local-only`.
+
+## PR 4B.2 — Linux Network Confinement
+
+`LinuxNetworkConfinement` usa um namespace de rede do `bwrap` e inicia o
+harness com ambiente limpo, sem interfaces externas e com loopback privado. Um
+gateway Unix privado, criado pelo RODS, é a única saída do namespace: ele é
+fixado ao host e porta do runtime loopback verificado. O harness não recebe
+credenciais herdadas nem acesso aos diretórios `/run`, `/var`, `HOME` ou `/tmp`
+do host fora da worktree controlada.
+
+O probe executa o mecanismo antes de declarar suporte. Em plataformas ou
+sandboxes nas quais o kernel recusa o namespace, o resultado é
+`NETWORK_ISOLATION_UNAVAILABLE`. A execução também recusa allowlists com mais
+de um endpoint ou qualquer endpoint fora de loopback. A disponibilidade real
+para OpenCode + Ollama segue pendente do experimento PR 4B.3.

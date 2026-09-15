@@ -121,6 +121,9 @@ O RODS também aceita uma rota efetiva por `network-confinement`: configuração
 explícita não basta, mas pode compor prova com runtime/modelo same-machine
 verificados e uma política do SO que permita apenas o endpoint loopback do
 runtime, bloqueie rede externa e registre zero conexões externas bem-sucedidas.
+No Linux, o RODS prepara essa política com namespace `bwrap` e um gateway Unix
+privado fixado ao runtime; se o kernel não suportar o isolamento, a execução é
+recusada.
 
 ## Instalação
 
