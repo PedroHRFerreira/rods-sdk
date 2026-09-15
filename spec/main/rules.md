@@ -13,3 +13,7 @@
 - When a required proof is unavailable, preserve fail-closed behavior and report the structured blocker; never weaken the proof criterion, parse undocumented internals, or silently fall back to cloud.
 - Treat execution harnesses as replaceable: keep Codex supported, but make it ineligible for `--local-only` while `verifiedLocalRoute` is false.
 - Admit an alternative harness to `--local-only` only when a documented, structured contract proves the active provider, resolved endpoint, effective model, correspondence to the verified runtime, authentication requirement, and absence of cloud fallback.
+- `--local-only` may alternatively use network confinement only when controlled harness configuration, a verified same-machine runtime/model, and OS-enforced external-network blocking compose an `EffectiveRouteProof`; configuration alone is never sufficient.
+- Network confinement must prevent, not merely observe, outbound traffic; it must allow only the verified local runtime endpoint and require zero successful external connections.
+- Implement confinement per platform and fail closed where it is unavailable; Linux is the first supported target.
+- When an implementation phase is correct and validated, always create its commit and proceed directly to the next planned phase.

@@ -38,6 +38,12 @@ import { LMStudioRuntimeAdapter } from "../src/local/lmstudio-runtime.js";
 import { collectMachineProfile } from "../src/local/machine-profile.js";
 import { CodexHarnessAdapter } from "../src/local/codex-harness.js";
 import {
+  buildEffectiveRouteProof,
+  confinementFromIsolation,
+  runtimeLocalityFromProof,
+} from "../src/local/effective-route.js";
+import {
+  DEFAULT_LOCAL_ONLY_POLICY,
   evaluateLocalOnlyGate,
   UNSUPPORTED_NETWORK_ISOLATION,
 } from "../src/local/local-only-gate.js";
@@ -510,6 +516,194 @@ test("local-only gate centralizes locality, harness, and network decisions", () 
       networkPolicy: "require-isolation",
     }),
     { allowed: true, reasons: [] },
+  );
+});
+
+test("effective route proof requires attestation or confined configured routing", () => {
+  const runtime = {
+    runtime: "ollama",
+    endpoint: "http://127.0.0.1:11434/api/tags",
+    model: "qwen3-coder:8b",
+    endpointLoopback: true,
+    runtimeVerified: true,
+    modelVerified: true,
+    executionLocality: "same-machine",
+    localityVerified: true,
+    evidence: [{ source: "ollama", detail: "loopback model inventory" }],
+  } as const;
+  const configuration = {
+    harness: "opencode",
+    provider: "ollama",
+    model: "qwen3-coder:8b",
+    configuredEndpoint: "http://127.0.0.1:11434/v1",
+    providerAllowlist: ["ollama"],
+    providerExplicit: true,
+    modelExplicit: true,
+    endpointExplicit: true,
+    allowlistEnforced: true,
+    evidence: [{ source: "opencode-openapi", detail: "explicit local provider config" }],
+  } as const;
+  const confinement = {
+    supported: true,
+    enabled: true,
+    mechanism: "test",
+    externalNetworkBlocked: true,
+    loopbackAllowed: true,
+    allowedEndpoints: ["127.0.0.1:11434"],
+    deniedExternalConnectionsObserved: 1,
+    externalConnectionsSucceeded: 0,
+    evidence: [{ source: "test", detail: "external traffic blocked" }],
+  } as const;
+  const confinedRoute = buildEffectiveRouteProof({
+    runtime,
+    configuration,
+    confinement,
+    verifiedAt: "2026-09-15T00:00:00.000Z",
+  });
+  assert.equal(confinedRoute.method, "network-confinement");
+  assert.equal(confinedRoute.verified, true);
+  assert.equal(confinedRoute.externalNetworkPossible, false);
+  assert.deepEqual(
+    evaluateLocalOnlyGate({
+      runtimeProof: runtime,
+      harnessConfigurationProof: configuration,
+      effectiveRouteProof: confinedRoute,
+      confinementProof: confinement,
+      policy: DEFAULT_LOCAL_ONLY_POLICY,
+    }),
+    { allowed: true, reasons: [] },
+  );
+
+  const attestedRoute = buildEffectiveRouteProof({
+    runtime,
+    attestation: {
+      harness: "future-harness",
+      provider: "ollama",
+      endpoint: "http://127.0.0.1:11434/v1",
+      runtime: "ollama",
+      model: "qwen3-coder:8b",
+      routeVerified: true,
+      cloudFallbackEnabled: false,
+      cloudCredentialsRequired: false,
+      evidence: [{ source: "official-api", detail: "effective route" }],
+      diagnostics: [],
+    },
+    confinement,
+  });
+  assert.equal(attestedRoute.method, "harness-attestation");
+  assert.equal(attestedRoute.verified, true);
+
+  assert.equal(
+    buildEffectiveRouteProof({
+      runtime,
+      attestation: {
+        harness: "future-harness",
+        provider: "ollama",
+        endpoint: "http://127.0.0.1:11434/v1",
+        model: "qwen3-coder:8b",
+        routeVerified: true,
+        cloudFallbackEnabled: false,
+        cloudCredentialsRequired: false,
+        evidence: [],
+        diagnostics: [],
+      },
+      confinement,
+    }).verified,
+    false,
+    "attestation without an explicit corresponding runtime is insufficient",
+  );
+});
+
+test("effective local-only gate fails closed for every incomplete proof", () => {
+  const locality = {
+    runtime: "ollama",
+    endpoint: "http://127.0.0.1:11434/api/tags",
+    loopback: true,
+    model: "qwen3-coder:8b",
+    runtimeVerified: true,
+    modelVerified: true,
+    verifiedAt: "2026-09-15T00:00:00.000Z",
+    evidence: [],
+  } as const;
+  const runtime = runtimeLocalityFromProof(locality);
+  const configuration = {
+    harness: "opencode",
+    provider: "ollama",
+    model: "qwen3-coder:8b",
+    configuredEndpoint: "http://127.0.0.1:11434/v1",
+    providerAllowlist: ["ollama"],
+    providerExplicit: true,
+    modelExplicit: true,
+    endpointExplicit: true,
+    allowlistEnforced: true,
+    evidence: [],
+  } as const;
+  const confined = {
+    supported: true,
+    enabled: true,
+    mechanism: "test",
+    externalNetworkBlocked: true,
+    loopbackAllowed: true,
+    allowedEndpoints: ["127.0.0.1:11434"],
+    externalConnectionsSucceeded: 0,
+    evidence: [],
+  } as const;
+  const route = buildEffectiveRouteProof({ runtime, configuration, confinement: confined });
+  const decision = (overrides: Record<string, unknown> = {}) =>
+    evaluateLocalOnlyGate({
+      runtimeProof: runtime,
+      harnessConfigurationProof: configuration,
+      effectiveRouteProof: route,
+      confinementProof: confined,
+      policy: DEFAULT_LOCAL_ONLY_POLICY,
+      ...overrides,
+    });
+
+  assert.equal(
+    decision({
+      harnessConfigurationProof: { ...configuration, endpointExplicit: false },
+      effectiveRouteProof: { ...route, verified: false },
+    }).errorCode,
+    "HARNESS_CONFIGURATION_NOT_VERIFIED",
+  );
+  assert.equal(
+    decision({
+      confinementProof: { ...confined, supported: false },
+      effectiveRouteProof: { ...route, verified: false, externalNetworkPossible: true },
+    }).errorCode,
+    "NETWORK_ISOLATION_UNAVAILABLE",
+  );
+  assert.equal(
+    decision({
+      confinementProof: { ...confined, externalConnectionsSucceeded: 1 },
+      effectiveRouteProof: { ...route, verified: false, externalNetworkPossible: true },
+    }).errorCode,
+    "EXTERNAL_NETWORK_REACHABLE",
+  );
+  assert.equal(
+    decision({
+      confinementProof: { ...confined, enabled: false },
+      effectiveRouteProof: { ...route, verified: false, externalNetworkPossible: true },
+    }).errorCode,
+    "NETWORK_ISOLATION_FAILED",
+  );
+  assert.equal(
+    decision({ effectiveRouteProof: { ...route, verified: false } }).errorCode,
+    "EFFECTIVE_ROUTE_NOT_VERIFIED",
+  );
+  assert.equal(
+    decision({
+      runtimeProof: { ...runtime, executionLocality: "local-network" },
+    }).errorCode,
+    "LOCALITY_NOT_VERIFIED",
+  );
+  assert.equal(
+    decision({ runtimeProof: { ...runtime, modelVerified: false } }).errorCode,
+    "LOCAL_MODEL_NOT_AVAILABLE",
+  );
+  assert.equal(
+    confinementFromIsolation(UNSUPPORTED_NETWORK_ISOLATION).externalConnectionsSucceeded,
+    Number.POSITIVE_INFINITY,
   );
 });
 

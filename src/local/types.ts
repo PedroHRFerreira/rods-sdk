@@ -146,6 +146,90 @@ export type CodexLocalProvider = "ollama" | "lmstudio";
 export type VerificationState = true | false | "unknown";
 export type LocalOnlyNetworkPolicy = "require-isolation" | "allow-unisolated";
 
+export type ExecutionLocality =
+  | "same-machine"
+  | "local-network"
+  | "remote"
+  | "unknown";
+
+/** Evidence collected by a documented harness contract. */
+export type HarnessEvidence = RuntimeEvidence;
+/** Evidence collected by an OS-level network-confinement mechanism. */
+export type NetworkEvidence = RuntimeEvidence;
+/** Evidence used to compose an effective execution-route proof. */
+export type RouteEvidence = RuntimeEvidence;
+
+/** Explicit harness configuration is evidence, but is never route proof by itself. */
+export type HarnessConfigurationProof = {
+  harness: string;
+  provider?: string;
+  model?: string;
+  configuredEndpoint?: string;
+  providerAllowlist?: string[];
+  providerExplicit: boolean;
+  modelExplicit: boolean;
+  endpointExplicit: boolean;
+  allowlistEnforced: boolean;
+  evidence: HarnessEvidence[];
+};
+
+/** Provider-neutral same-machine evidence, independent of an execution harness. */
+export type RuntimeLocalityProof = {
+  runtime: string;
+  endpoint: string;
+  model: string;
+  endpointLoopback: boolean;
+  runtimeVerified: boolean;
+  modelVerified: boolean;
+  executionLocality: ExecutionLocality;
+  localityVerified: boolean;
+  evidence: RuntimeEvidence[];
+};
+
+export type NetworkConfinementProof = {
+  supported: boolean;
+  enabled: boolean;
+  mechanism: string;
+  externalNetworkBlocked: boolean;
+  loopbackAllowed: boolean;
+  allowedEndpoints: string[];
+  deniedExternalConnectionsObserved?: number;
+  externalConnectionsSucceeded: number;
+  evidence: NetworkEvidence[];
+};
+
+export type EffectiveRouteProofMethod =
+  | "harness-attestation"
+  | "network-confinement";
+
+/**
+ * Proof that an execution can reach only the verified local runtime, either
+ * through a harness attestation or through OS-enforced network confinement.
+ */
+export type EffectiveRouteProof = {
+  verified: boolean;
+  method: EffectiveRouteProofMethod;
+  harness: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  runtimeVerified: boolean;
+  modelVerified: boolean;
+  executionLocality: ExecutionLocality;
+  externalNetworkPossible: boolean;
+  evidence: RouteEvidence[];
+  verifiedAt: string;
+};
+
+export type LocalOnlyPolicy = {
+  requireSameMachineInference: boolean;
+  requireVerifiedRuntime: boolean;
+  requireVerifiedModel: boolean;
+  requireEffectiveRouteProof: boolean;
+  requireExternalNetworkBlocked: boolean;
+  allowLocalNetworkRuntime: boolean;
+};
+
 /** OS-level evidence; this is intentionally distinct from a harness sandbox. */
 export type NetworkIsolationProof = {
   supported: boolean;
@@ -160,8 +244,8 @@ export type NetworkIsolationProof = {
  * from LocalityProof: a healthy runtime does not prove that Codex uses it.
  */
 export type HarnessRouteProof = {
-  harness: "codex";
-  provider?: CodexLocalProvider;
+  harness: string;
+  provider?: CodexLocalProvider | string;
   endpoint?: string;
   runtime?: string;
   model?: string;
@@ -180,7 +264,12 @@ export type LocalOnlyGateDecision =
         | "LOCALITY_NOT_VERIFIED"
         | "LOCAL_MODEL_NOT_AVAILABLE"
         | "HARNESS_NOT_READY"
-        | "NETWORK_ISOLATION_UNAVAILABLE";
+        | "HARNESS_CONFIGURATION_NOT_VERIFIED"
+        | "NETWORK_ISOLATION_UNAVAILABLE"
+        | "NETWORK_ISOLATION_FAILED"
+        | "EXTERNAL_NETWORK_REACHABLE"
+        | "EFFECTIVE_ROUTE_NOT_VERIFIED"
+        | "LOCAL_ONLY_GUARANTEE_FAILED";
       reasons: string[];
     };
 

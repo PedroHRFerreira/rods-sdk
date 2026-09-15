@@ -77,8 +77,10 @@ Até existir uma interface pública e verificável que prove essas propriedades,
 | 2 | Harness Route Proof | Concluído — rota Codex não verificável nesta versão |
 | 3 | Local-Only Security Gate | Concluído |
 | 4A | E2E Security Infrastructure | Concluído |
-| 4B | Verified Local E2E | Bloqueado externamente — `CODEX_HARNESS_CONTRACT_INSUFFICIENT` |
-| Próximo | Alternative Harness Evaluation | Planejado |
+| 4B.1 | Effective Route Contract | Concluído — contratos e gate composto |
+| 4B.2 | Linux Network Confinement | Próximo |
+| 4B.3 | OpenCode Confinement Evaluation | Dependente de 4B.2 e Ollama real |
+| 4B.4 | Verified Local E2E | Dependente de 4B.3 |
 
 O gate centralizado nega a execução antes de iniciar o harness. Com o estado
 atual, a razão é `HARNESS_NOT_READY`; harness não será iniciado, arquivos não
@@ -135,3 +137,21 @@ público e estruturado atestar provider ativo, endpoint resolvido, modelo
 efetivamente usado, correspondência com o runtime verificado, requisito de
 autenticação e ausência de fallback cloud. Até lá, a resposta correta do gate
 é negar a execução, sem workaround ou inferência por configuração aparente.
+
+## PR 4B.1 — Effective Route Contract
+
+O RODS agora formaliza duas estratégias independentes para uma rota efetiva:
+`harness-attestation` e `network-confinement`. A primeira exige atestação
+estruturada da rota pelo harness. A segunda exige, simultaneamente,
+configuração explícita com allowlist, runtime e modelo `same-machine`
+verificados, e confinamento de rede imposto pelo SO.
+
+`HarnessConfigurationProof` nunca autoriza uma execução sozinho. Para o
+caminho de confinamento, a prova requer loopback liberado apenas para o
+endpoint do runtime, rede externa bloqueada e
+`externalConnectionsSucceeded = 0`. O `LocalOnlyGate` ganhou uma entrada
+tipada para essa prova composta e continua negando qualquer estado incompleto.
+
+O próximo PR implementará apenas `LinuxNetworkConfinement`. Até que ele exista
+e o experimento real OpenCode + Ollama o aprove, OpenCode permanece inelegível
+para `--local-only`.

@@ -117,6 +117,11 @@ um `HarnessRouteProof` estruturado para provider, endpoint, modelo, runtime,
 autenticação e ausência de fallback cloud. O gate não será relaxado para
 acomodar nenhum provider.
 
+O RODS também aceita uma rota efetiva por `network-confinement`: configuração
+explícita não basta, mas pode compor prova com runtime/modelo same-machine
+verificados e uma política do SO que permita apenas o endpoint loopback do
+runtime, bloqueie rede externa e registre zero conexões externas bem-sucedidas.
+
 ## Instalação
 
 ```bash
