@@ -9,6 +9,7 @@ import { announce, buildDeveloperPrompt, formatIterationSummary, humanDuration, 
 import { enforceApproval } from '../src/services/agent-runner.js';
 import { getDefaultConfig } from '../src/services/config.js';
 import { persistFindings, recurringFindings, recurringForFiles, reviewContextSnippets, runTestGate, sanitizeTestOutput, selectReviewDiff } from '../src/services/flow-review.js';
+import { formatContextSnippets, formatRecurringPatterns } from '../src/services/formatting-compact.js';
 import { lexicalOverlap, normalizeQuestion } from '../src/services/qa.js';
 
 test('approval enforcement reconciles claimed approval with blocking severities', () => {
@@ -22,9 +23,10 @@ test('approval enforcement reconciles claimed approval with blocking severities'
 test('developer correction prompt reuses recurring patterns while initial prompt does not', () => {
   const recurring = { patterns: [{ file: 'src/a.ts', severity: 'high' as const, message: 'handle async failures', count: 2 }], findingsConsulted: 2, comparisons: 4 };
   const review = { approved: false, summary: 'fix it', findings: [{ file: 'src/a.ts', severity: 'high' as const, message: 'handle async failures' }] };
-  assert.doesNotMatch(buildDeveloperPrompt('adjust flow'), /knownPatterns/);
+  assert.match(buildDeveloperPrompt('adjust flow'), /current worktree/);
+  assert.match(buildDeveloperPrompt('adjust flow'), /Run relevant tests/);
   const correction = buildDeveloperPrompt('adjust flow', review, recurring, 'diff content');
-  assert.match(correction, /knownPatterns/);
+  assert.match(correction, /Patterns:/);
   assert.match(correction, /handle async failures/);
   assert.match(correction, /diff content/);
 });
@@ -103,6 +105,7 @@ test('test gate skips when absent, passes commands, and creates a bounded synthe
   assert.equal(runTestGate({ command: 'test' }, root, () => ({ status: 0, stdout: 'passed', stderr: '' })).status, 'passed');
   const failed = runTestGate({ command: 'test' }, root, () => ({ status: 7, stdout: '', stderr: '\u001b[31mfailed-output\u001b[0m' })); assert.equal(failed.status, 'failed'); assert.equal(failed.finding?.severity, 'high'); assert.equal(failed.finding?.file, null); assert.match(failed.finding?.message ?? '', /failed-output/);
   const sanitized = sanitizeTestOutput(`\u001b[31m${'x'.repeat(3000)}\u001b[0m`); assert.equal(sanitized.length, 2000); assert.doesNotMatch(sanitized, /\u001b/);
+  const trace = Array.from({ length: 100 }, (_, index) => `at line ${index}`).join('\n'); const compact = sanitizeTestOutput(trace); assert.match(compact, /at line 0/); assert.match(compact, /at line 99/);
   assert.equal(runTestGate({ command: path.join(root, 'missing') }, root, () => ({ status: null, error: new Error('ENOENT') })).status, 'failed');
 });
 
@@ -121,7 +124,7 @@ test('lexical recurrence groups async paraphrases at 0.50 and reports comparison
   const first = finding(1, 'falta tratamento de erro na chamada assíncrona'); const second = finding(2, 'não há tratamento de erro para a chamada async', 'high'); const unrelated = finding(3, 'nome de variável pouco descritivo', 'low');
   assert.ok(lexicalOverlap(first.messageNorm, second.messageNorm) >= 0.5);
   const result = recurringFindings([first, second, unrelated]);
-  assert.equal(result.patterns.length, 1); assert.equal(result.patterns[0]?.count, 2); assert.equal(result.patterns[0]?.severity, 'high'); assert.equal(result.findingsConsulted, 3); assert.equal(result.comparisons, 9);
+  assert.equal(result.patterns.length, 1); assert.equal(result.patterns[0]?.count, 2); assert.equal(result.patterns[0]?.severity, 'high'); assert.equal(result.findingsConsulted, 3); assert.equal(result.comparisons, 3);
 });
 
 test('project context search never returns chunks from another registered project', async () => {
@@ -132,6 +135,22 @@ test('project context search never returns chunks from another registered projec
     db.replaceChunksForPath('/two/b.ts', [{ projectId: two.id, path: '/two/b.ts', scope: 'general', kind: 'file', language: 'typescript', startLine: 1, endLine: 1, hash: 'two', content: 'function checkoutHandler() { unsafe(); }' }]);
     const bundle = { content: '', touchedFiles: ['src/a.ts'], includedFiles: ['src/a.ts'], omittedFiles: [], changedLines: { 'src/a.ts': 1 }, patches: { 'src/a.ts': '+function checkoutHandler() {}' } };
     const results = reviewContextSnippets(db, one.id, bundle); assert.ok(results.length > 0); assert.ok(results.every((result) => result.projectId === one.id));
+  } finally { db.close(); }
+});
+
+test('compact formatters bound prompt payloads and context ranking favors touched files', async () => {
+  assert.equal(formatRecurringPatterns([{ file: 'src/a.ts', severity: 'high', message: 'handle    async failures with useful context', count: 2 }]), 'src/a.ts|handle async failures with useful context|2xH');
+  const context = formatContextSnippets([{ path: 'src/a.ts', startLine: 4, snippet: 'x'.repeat(100) }] as never);
+  assert.match(context, /…$/);
+
+  const storage = await fs.mkdtemp(path.join(os.tmpdir(), 'rods-context-rank-')); const db = new ContextDatabase({ ...getDefaultConfig(), database: path.join(storage, 'db.sqlite') });
+  try {
+    const project = db.upsertProject('rank', storage);
+    db.replaceChunksForPath(path.join(storage, 'src/a.ts'), [{ projectId: project.id, path: path.join(storage, 'src/a.ts'), scope: 'general', kind: 'file', language: 'typescript', startLine: 1, endLine: 1, hash: 'exact', content: 'function checkoutHandler() {}' }]);
+    db.replaceChunksForPath(path.join(storage, 'src/other.ts'), [{ projectId: project.id, path: path.join(storage, 'src/other.ts'), scope: 'general', kind: 'file', language: 'typescript', startLine: 1, endLine: 1, hash: 'other', content: 'function checkoutHandler() {}' }]);
+    const bundle = { content: '', touchedFiles: ['src/a.ts'], includedFiles: ['src/a.ts'], omittedFiles: [], changedLines: { 'src/a.ts': 1 }, patches: { 'src/a.ts': '+function checkoutHandler() {}' } };
+    const results = reviewContextSnippets(db, project.id, bundle);
+    assert.equal(results[0]?.path, path.join(storage, 'src/a.ts'));
   } finally { db.close(); }
 });
 

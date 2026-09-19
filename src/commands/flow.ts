@@ -12,8 +12,6 @@ import { AGENT_TARGET_IDS, loadGovernanceConfig, type AgentTarget, type IGoverna
 import { loadConfig } from '../services/config.js';
 import {
   buildReviewDiff,
-  formatContextSnippets,
-  formatRecurringPatterns,
   persistFindings,
   recurringFindings,
   recurringForFiles,
@@ -21,6 +19,8 @@ import {
   runTestGate,
   type IRecurringFindingResult
 } from '../services/flow-review.js';
+import { formatContextSnippets, formatRecurringPatterns } from '../services/formatting-compact.js';
+import { buildCorrectionDeveloperPrompt, buildInitialDeveloperPrompt, buildReviewPrompt } from '../utils/prompt-templates.js';
 
 type FlowMode = string;
 type IterationOutcome = 'gate_failed' | 'changes_requested' | 'approved' | 'max_iterations';
@@ -74,8 +74,8 @@ export function isValidFlowMode(mode: string): boolean {
 }
 
 export function buildDeveloperPrompt(task: string, review?: ReviewResult, recurring?: IRecurringFindingResult, correctionDiff?: string): string {
-  if (!review) return `Implement this task in the current worktree. Run relevant tests and leave all changes in the worktree. Task: ${compactTask(task)}`;
-  return `Correct only the outstanding review findings for this task. Do not restart the implementation. Task: ${compactTask(task)}\nFindings: ${JSON.stringify(review.findings)}\n${formatRecurringPatterns(recurring?.patterns ?? [])}\nCurrent diff:\n${correctionDiff ?? ''}`;
+  if (!review) return buildInitialDeveloperPrompt(compactTask(task));
+  return buildCorrectionDeveloperPrompt(compactTask(task), review, recurring, correctionDiff ?? '');
 }
 
 export function registerFlowCommand(program: Command): void {
@@ -167,7 +167,13 @@ export function registerFlowCommand(program: Command): void {
         const reviewStarted = Date.now();
         announce(`${iterationLabel} ${reviewer} está revisando…`);
         try {
-          const prompt = `Review the implementation for correctness, regressions, security, and tests. Return only the required JSON. Task: ${compactTask(task)}\n${gate.status === 'passed' ? 'testCommand: passed' : 'testCommand: not configured'}\n${formatRecurringPatterns(recurring.patterns)}\n${config.workflow?.reviewContext ? formatContextSnippets(contextResults) : 'reviewContext: disabled'}\nTracked and untracked diff bundle:\n${bundle.content}`;
+          const prompt = buildReviewPrompt(
+            compactTask(task),
+            gate.status === 'passed' ? 'passed' : 'skipped',
+            formatRecurringPatterns(recurring.patterns),
+            config.workflow?.reviewContext ? formatContextSnippets(contextResults) : '',
+            bundle.content
+          );
           const result = await runAgent({ agent: reviewer, config: execution(config, reviewer), tier: classification.level, cwd: worktree, review: true, failOnSeverity, prompt });
           review = result.review!; reviewsExecuted++;
           if (review.approved) announce(`${iterationLabel} ${reviewer} revisou → aprovado`);

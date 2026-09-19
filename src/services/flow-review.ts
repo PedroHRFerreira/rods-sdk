@@ -5,9 +5,10 @@ import type { ContextDatabase, IFlowFinding } from '../database/database.js';
 import type { ISearchResult } from '../types/context.js';
 import type { ReviewResult } from './agent-runner.js';
 import type { IWorkflowTestCommand } from './adapters.js';
+import { compactStackTrace } from './formatting-compact.js';
 import { lexicalOverlap, normalizeQuestion } from './qa.js';
 
-export const REVIEW_DIFF_BUDGET = 50_000;
+export const REVIEW_DIFF_BUDGET = 12_000;
 export const FINDING_OVERLAP_THRESHOLD = 0.5;
 
 export interface ITestGateResult {
@@ -44,7 +45,7 @@ export interface IRecurringFindingResult {
 const ANSI = /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g;
 
 export function sanitizeTestOutput(value: string): string {
-  return value.replace(ANSI, '').trim().slice(-2000);
+  return compactStackTrace(value.replace(ANSI, '').trim()).slice(-2000);
 }
 
 export function runTestGate(command: IWorkflowTestCommand | undefined, cwd: string, executor: TestGateExecutor = spawnSync as TestGateExecutor): ITestGateResult {
@@ -100,13 +101,30 @@ function severityRank(value: IFlowFinding['severity']): number { return value ==
 export function recurringFindings(findings: IFlowFinding[], limit = 3): IRecurringFindingResult {
   const eligible = findings.filter((finding) => finding.file && finding.messageNorm);
   let comparisons = 0;
-  const candidates = eligible.map((finding) => {
-    let count = 0;
-    for (const other of eligible) { if (other.file !== finding.file) continue; comparisons++; if (lexicalOverlap(finding.messageNorm, other.messageNorm) >= FINDING_OVERLAP_THRESHOLD) count++; }
-    return { finding, count };
-  }).filter((candidate) => candidate.count >= 2).sort((left, right) => right.count - left.count || severityRank(right.finding.severity) - severityRank(left.finding.severity) || right.finding.createdAt.localeCompare(left.finding.createdAt) || right.finding.id - left.finding.id);
+  const byFile = new Map<string, IFlowFinding[]>();
+  for (const finding of eligible) {
+    const group = byFile.get(finding.file!) ?? [];
+    group.push(finding);
+    byFile.set(finding.file!, group);
+  }
+  const candidates: Array<{ finding: IFlowFinding; count: number }> = [];
+  for (const group of byFile.values()) {
+    const counts = group.map(() => 1);
+    for (let left = 0; left < group.length; left++) {
+      for (let right = left + 1; right < group.length; right++) {
+        comparisons++;
+        if (lexicalOverlap(group[left]!.messageNorm, group[right]!.messageNorm) >= FINDING_OVERLAP_THRESHOLD) {
+          counts[left]++; counts[right]++;
+        }
+      }
+    }
+    for (let index = 0; index < group.length; index++) candidates.push({ finding: group[index]!, count: counts[index]! });
+  }
+  const rankedCandidates = candidates
+    .filter((candidate) => candidate.count >= 2)
+    .sort((left, right) => right.count - left.count || severityRank(right.finding.severity) - severityRank(left.finding.severity) || right.finding.createdAt.localeCompare(left.finding.createdAt) || right.finding.id - left.finding.id);
   const patterns: IRecurringPattern[] = [];
-  for (const candidate of candidates) {
+  for (const candidate of rankedCandidates) {
     if (patterns.some((pattern) => pattern.file === candidate.finding.file && lexicalOverlap(normalizeQuestion(pattern.message), candidate.finding.messageNorm) >= FINDING_OVERLAP_THRESHOLD)) continue;
     patterns.push({ file: candidate.finding.file!, severity: candidate.finding.severity, message: candidate.finding.message, count: candidate.count });
     if (patterns.length >= limit) break;
@@ -140,9 +158,29 @@ function changedSymbols(bundle: IDiffBundle): string[] {
 }
 
 export function reviewContextSnippets(db: ContextDatabase, projectId: number, bundle: IDiffBundle, limit = 5): ISearchResult[] {
-  const results: ISearchResult[] = []; const seen = new Set<number>(); const queries = [...changedSymbols(bundle), ...bundle.touchedFiles.map((file) => path.basename(file, path.extname(file)))];
-  for (const query of [...new Set(queries)]) { for (const result of db.searchProject(query, projectId, limit, 'general')) { if (seen.has(result.id)) continue; seen.add(result.id); results.push(result); if (results.length >= limit) return results; } }
-  return results;
+  type RankedResult = ISearchResult & { score: number };
+  const results = new Map<number, RankedResult>();
+  const files = bundle.touchedFiles.map(posix);
+  const queries = [...new Set([...changedSymbols(bundle), ...files.map((file) => path.basename(file, path.extname(file)))])];
+  const matchesFile = (resultPath: string, file: string) => posix(resultPath) === file || posix(resultPath).endsWith(`/${file}`);
+  const sameDirectory = (resultPath: string, file: string) => {
+    const directory = posix(path.dirname(file));
+    const resultDirectory = posix(path.dirname(resultPath));
+    return directory !== '.' && (resultDirectory === directory || resultDirectory.endsWith(`/${directory}`));
+  };
+  for (const query of queries) {
+    for (const result of db.searchProject(query, projectId, 20, 'general')) {
+      const current = results.get(result.id) ?? { ...result, score: 1 };
+      if (files.some((file) => matchesFile(result.path, file))) current.score += 50;
+      else if (files.some((file) => sameDirectory(result.path, file))) current.score += 20;
+      if (result.snippet.toLowerCase().includes(query.toLowerCase())) current.score += 30;
+      results.set(result.id, current);
+    }
+  }
+  return [...results.values()]
+    .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path) || left.id - right.id)
+    .slice(0, limit)
+    .map(({ score: _score, ...result }) => result);
 }
 
 export function formatRecurringPatterns(patterns: IRecurringPattern[]): string {

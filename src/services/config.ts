@@ -9,7 +9,7 @@ export function getDefaultConfig(): IContextConfig {
     chunkSize: 120,
     searchLimit: 8,
     watch: true,
-    ignore: ['node_modules', '.git', '.nuxt', '.output', 'dist', 'coverage', '.cache', '.next']
+    ignore: ['node_modules', '.git', '.nuxt', '.output', 'dist', 'coverage', '.cache', '.next', 'build', 'tmp', '.turbo']
   };
 }
 
