@@ -743,17 +743,29 @@ test("Linux network confinement wraps a process with a private loopback runtime 
   );
   assert.equal(requests.length, 3);
   assert.deepEqual(requests[0]!.args, ["--version"]);
-  assert.deepEqual(requests[1]!.args?.slice(0, 5), [
+  assert.deepEqual(requests[1]!.args?.slice(0, 8), [
+    "--unshare-user",
+    "--uid",
+    "0",
+    "--gid",
+    "0",
     "--unshare-net",
+    "--cap-add",
+    "CAP_NET_ADMIN",
+  ]);
+  assert.deepEqual(requests[1]!.args?.slice(8, 14), [
     "--die-with-parent",
-    "--",
-    "/usr/bin/ip",
-    "link",
+    "--ro-bind",
+    "/usr",
+    "/usr",
+    "--ro-bind",
+    "/bin",
   ]);
   assert.equal(requests[2]!.command, "bwrap");
   assert.ok(requests[2]!.args?.includes("--unshare-net"));
   assert.ok(requests[2]!.args?.includes("--clearenv"));
   assert.ok(requests[2]!.args?.includes("/run/rods/runtime.sock"));
+  assert.ok(requests[2]!.args?.includes('ip link set lo up && exec "$@"'));
   assert.deepEqual(confined.proof.allowedEndpoints, ["http://127.0.0.1:11434/v1"]);
   assert.equal(confined.proof.externalConnectionsSucceeded, 0);
   assert.equal(confined.proof.externalNetworkBlocked, true);

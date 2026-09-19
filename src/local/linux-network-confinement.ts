@@ -38,6 +38,28 @@ export interface NetworkConfinement {
 type ProcessExecutor = Pick<ProcessRunner, "run">;
 
 const BWRAP = "bwrap";
+const ENABLE_LOOPBACK_AND_EXEC = 'ip link set lo up && exec "$@"';
+const NETWORK_NAMESPACE_CAPABILITY_ARGS = [
+  "--unshare-user",
+  "--uid", "0",
+  "--gid", "0",
+  "--unshare-net",
+  "--cap-add", "CAP_NET_ADMIN",
+] as const;
+const LOOPBACK_PROBE_ARGS = [
+  ...NETWORK_NAMESPACE_CAPABILITY_ARGS,
+  "--die-with-parent",
+  "--ro-bind", "/usr", "/usr",
+  "--ro-bind", "/bin", "/bin",
+  "--ro-bind", "/lib", "/lib",
+  "--ro-bind", "/lib64", "/lib64",
+  "--proc", "/proc",
+  "--dev", "/dev",
+  "--clearenv",
+  "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
+  "--",
+  "/bin/sh", "-c", "ip link set lo up && ip link show lo",
+] as const;
 const LOOPBACK_TUNNEL = String.raw`
 import net from "node:net";
 import { spawn } from "node:child_process";
@@ -111,7 +133,7 @@ export class LinuxNetworkConfinement implements NetworkConfinement {
     try {
       const result = await this.runner.run({
         command: BWRAP,
-        args: ["--unshare-net", "--die-with-parent", "--", "/usr/bin/ip", "link", "show", "lo"],
+        args: [...LOOPBACK_PROBE_ARGS],
         timeoutMs: 2_000,
         signal,
         maxOutputBytes: 8 * 1024,
@@ -123,7 +145,7 @@ export class LinuxNetworkConfinement implements NetworkConfinement {
           installed: true,
           usable: true,
           verified: true,
-          diagnostics: ["bubblewrap created an isolated namespace with loopback"],
+          diagnostics: ["bubblewrap created an isolated network namespace with an active loopback interface"],
         };
       return {
         supported: false,
@@ -131,7 +153,7 @@ export class LinuxNetworkConfinement implements NetworkConfinement {
         installed: true,
         usable: false,
         verified: false,
-        diagnostics: ["bubblewrap could not create an isolated loopback network namespace"],
+        diagnostics: ["bubblewrap could not create an isolated network namespace with an active loopback interface"],
       };
     } catch (error) {
       return {
@@ -252,7 +274,7 @@ function confinementArgs(
   port: number,
 ): string[] {
   const args = [
-    "--unshare-net",
+    ...NETWORK_NAMESPACE_CAPABILITY_ARGS,
     "--unshare-ipc",
     "--unshare-pid",
     "--new-session",
@@ -287,6 +309,10 @@ function confinementArgs(
     "--setenv", "TMPDIR", "/tmp",
     "--chdir", cwd,
     "--",
+    "/bin/sh",
+    "-c",
+    ENABLE_LOOPBACK_AND_EXEC,
+    "rods-confinement",
     process.execPath,
     "-e",
     LOOPBACK_TUNNEL,
