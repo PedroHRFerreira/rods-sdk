@@ -106,6 +106,7 @@ test('test gate skips when absent, passes commands, and creates a bounded synthe
   const failed = runTestGate({ command: 'test' }, root, () => ({ status: 7, stdout: '', stderr: '\u001b[31mfailed-output\u001b[0m' })); assert.equal(failed.status, 'failed'); assert.equal(failed.finding?.severity, 'high'); assert.equal(failed.finding?.file, null); assert.match(failed.finding?.message ?? '', /failed-output/);
   const sanitized = sanitizeTestOutput(`\u001b[31m${'x'.repeat(3000)}\u001b[0m`); assert.equal(sanitized.length, 2000); assert.doesNotMatch(sanitized, /\u001b/);
   const trace = Array.from({ length: 100 }, (_, index) => `at line ${index}`).join('\n'); const compact = sanitizeTestOutput(trace); assert.match(compact, /at line 0/); assert.match(compact, /at line 99/);
+  const longTrace = Array.from({ length: 100 }, (_, index) => `${'x'.repeat(300)} line ${index}`).join('\n'); const bounded = sanitizeTestOutput(longTrace); assert.equal(bounded.length, 2000); assert.match(bounded, /line 0/); assert.match(bounded, /line 99/); assert.match(bounded, /omitted/);
   assert.equal(runTestGate({ command: path.join(root, 'missing') }, root, () => ({ status: null, error: new Error('ENOENT') })).status, 'failed');
 });
 

@@ -45,7 +45,7 @@ export interface IRecurringFindingResult {
 const ANSI = /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g;
 
 export function sanitizeTestOutput(value: string): string {
-  return compactStackTrace(value.replace(ANSI, '').trim()).slice(-2000);
+  return compactStackTrace(value.replace(ANSI, '').trim());
 }
 
 export function runTestGate(command: IWorkflowTestCommand | undefined, cwd: string, executor: TestGateExecutor = spawnSync as TestGateExecutor): ITestGateResult {

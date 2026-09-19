@@ -19,11 +19,21 @@ export function formatContextSnippets(results: ISearchResult[], maxCharsPerSnipp
   }).join('\n');
 }
 
-export function compactStackTrace(trace: string, maxLines = 20): string {
+function compactTextPreservingEnds(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  const marker = '\n[… content omitted …]\n';
+  if (maxChars <= marker.length) return value.slice(0, maxChars);
+  const available = maxChars - marker.length;
+  const headLength = Math.ceil(available / 2);
+  return `${value.slice(0, headLength)}${marker}${value.slice(-(available - headLength))}`;
+}
+
+export function compactStackTrace(trace: string, maxLines = 20, maxChars = 2_000): string {
   const lines = trace.split('\n');
-  if (lines.length <= maxLines) return trace;
-  const half = Math.floor(maxLines / 2);
-  return [...lines.slice(0, half), '', `[… ${lines.length - maxLines} lines omitted …]`, '', ...lines.slice(-half)].join('\n');
+  const compacted = lines.length <= maxLines
+    ? trace
+    : [...lines.slice(0, Math.floor(maxLines / 2)), '', `[… ${lines.length - maxLines} lines omitted …]`, '', ...lines.slice(-Math.floor(maxLines / 2))].join('\n');
+  return compactTextPreservingEnds(compacted, maxChars);
 }
 
 export function compactDiff(diff: string, maxLines = 200): string {
