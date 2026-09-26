@@ -425,6 +425,26 @@ gemini+codex  gemini+claude
 
 ## Integração Com Codex
 
+### Plugin do Codex
+
+O repositório também distribui o plugin `rods-sdk` com duas skills: planejamento
+do `rods init` e busca com Context Engine. Para instalar pelo marketplace do
+GitHub:
+
+```bash
+codex plugin marketplace add PedroHRFerreira/rods-sdk
+codex plugin add rods-sdk@rods-sdk
+```
+
+O plugin contém instruções para o Codex; a CLI continua sendo instalada à parte:
+
+```bash
+npm install -g @pedrohrferreira/rods-sdk
+```
+
+O plugin não instala a CLI automaticamente nem configura o servidor MCP local.
+Para a integração MCP, siga [`docs/codex.md`](docs/codex.md).
+
 O Rods SDK expõe o servidor MCP do Context Engine para o Codex:
 
 ```bash

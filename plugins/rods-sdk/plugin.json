@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "rods-sdk",
+  "version": "0.2.1",
+  "description": "Plan project-specific agent skills and retrieve repository context with RODS.",
+  "author": {
+    "name": "Pedro Ferreira",
+    "url": "https://github.com/PedroHRFerreira"
+  },
+  "homepage": "https://github.com/PedroHRFerreira/rods-sdk",
+  "repository": "https://github.com/PedroHRFerreira/rods-sdk",
+  "keywords": ["codex", "skills", "repository-context", "agent-governance"]
+}

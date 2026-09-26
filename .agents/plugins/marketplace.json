@@ -1,0 +1,20 @@
+{
+  "name": "rods-sdk",
+  "interface": {
+    "displayName": "RODS SDK"
+  },
+  "plugins": [
+    {
+      "name": "rods-sdk",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rods-sdk"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
