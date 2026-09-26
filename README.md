@@ -445,6 +445,10 @@ npm install -g @pedrohrferreira/rods-sdk
 O plugin não instala a CLI automaticamente nem configura o servidor MCP local.
 Para a integração MCP, siga [`docs/codex.md`](docs/codex.md).
 
+[Política de privacidade](PRIVACY.md) · [Termos de uso](TERMS.md).
+
+O código-fonte é distribuído sob a [licença MIT](LICENSE).
+
 O Rods SDK expõe o servidor MCP do Context Engine para o Codex:
 
 ```bash

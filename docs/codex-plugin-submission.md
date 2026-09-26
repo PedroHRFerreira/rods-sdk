@@ -4,7 +4,7 @@ Pacote: [`plugins/rods-sdk/`](../plugins/rods-sdk/)
 
 Tipo de submissão: **Skills only**
 
-Versão do plugin: **0.2.2** (CLI RODS: **0.2.1**)
+Versão do plugin: **0.2.3** (CLI RODS: **0.2.2**)
 
 O `plugin.json` na raiz é o manifesto portátil. Sua extensão
 `extensions.com.openai` contém a apresentação para Codex e ChatGPT;
@@ -21,8 +21,8 @@ O `plugin.json` na raiz é o manifesto portátil. Sua extensão
 | Site | https://github.com/PedroHRFerreira/rods-sdk |
 | Suporte | https://github.com/PedroHRFerreira/rods-sdk/issues |
 | Logo | `plugins/rods-sdk/assets/logo.png` |
-| Política de privacidade | Pendente: URL pública fornecida pelo mantenedor |
-| Termos de uso | Pendente: URL pública fornecida pelo mantenedor |
+| Política de privacidade | https://github.com/PedroHRFerreira/rods-sdk/blob/main/PRIVACY.md |
+| Termos de uso | https://github.com/PedroHRFerreira/rods-sdk/blob/main/TERMS.md |
 | Identidade do desenvolvedor | Selecionar identidade verificada no OpenAI Platform |
 | Disponibilidade | Selecionar países após confirmar suporte e textos legais |
 
@@ -39,7 +39,7 @@ e o portal exige um endpoint HTTPS público para submissões com MCP.
 ## Casos de teste positivos
 
 Fixture reproduzível: clone público de `https://github.com/PedroHRFerreira/rods-sdk`
-em diretório temporário, Node.js 20+ e `@pedrohrferreira/rods-sdk@0.2.1`.
+em diretório temporário, Node.js 20+ e `@pedrohrferreira/rods-sdk@0.2.2`.
 Para os casos de projeto já inicializado, execute `rods init <clone> --no-plan`
 antes do teste. O primeiro caso requer terminal interativo e uma CLI de modelo
 configurada; se isso não estiver disponível, avalie o fallback documentado.
@@ -60,4 +60,4 @@ configurada; se isso não estiver disponível, avalie o fallback documentado.
 
 Primeira submissão do plugin RODS SDK. Inclui duas skills para planejamento de
 governança e recuperação de contexto. A CLI é distribuída separadamente pelo
-npm como `@pedrohrferreira/rods-sdk@0.2.1`.
+npm como `@pedrohrferreira/rods-sdk@0.2.2`.
