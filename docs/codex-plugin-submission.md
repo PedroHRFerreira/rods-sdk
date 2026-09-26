@@ -23,12 +23,19 @@ O `plugin.json` na raiz é o manifesto portátil. Sua extensão
 | Logo | `plugins/rods-sdk/assets/logo.png` |
 | Política de privacidade | https://github.com/PedroHRFerreira/rods-sdk/blob/main/PRIVACY.md |
 | Termos de uso | https://github.com/PedroHRFerreira/rods-sdk/blob/main/TERMS.md |
-| Identidade do desenvolvedor | Selecionar identidade verificada no OpenAI Platform |
-| Disponibilidade | Selecionar países após confirmar suporte e textos legais |
+| Identidade do desenvolvedor | Pedro Henrique Ferreira (verificada, segundo o mantenedor) |
+| Permissão do remetente | Confirmar `Apps Management: Write` na organização do OpenAI Platform |
+| Disponibilidade | Brasil |
 
 O pacote para upload é o diretório `plugins/rods-sdk/skills/`, com os dois
 `SKILL.md`. Esta submissão não inclui MCP: o servidor do RODS roda localmente,
 e o portal exige um endpoint HTTPS público para submissões com MCP.
+
+No [portal de submissão](https://platform.openai.com/plugins), criar um plugin
+**Skills only**, preencher os dados acima, enviar o bundle de skills, copiar os
+prompts e casos de teste abaixo, selecionar apenas **Brasil** e revisar as
+atestações antes de **Submit for Review**. O envio depende de uma sessão
+autenticada com `Apps Management: Write`.
 
 ## Prompts iniciais
 
