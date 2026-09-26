@@ -4,7 +4,11 @@ Pacote: [`plugins/rods-sdk/`](../plugins/rods-sdk/)
 
 Tipo de submissão: **Skills only**
 
-Versão: **0.2.1**
+Versão do plugin: **0.2.2** (CLI RODS: **0.2.1**)
+
+O `plugin.json` na raiz é o manifesto portátil. Sua extensão
+`extensions.com.openai` contém a apresentação para Codex e ChatGPT;
+`.codex-plugin/plugin.json` permanece como fallback de compatibilidade.
 
 ## Informações para o formulário
 

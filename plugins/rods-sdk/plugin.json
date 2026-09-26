@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "rods-sdk",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Plan project-specific agent skills and retrieve repository context with RODS.",
   "author": {
     "name": "Pedro Ferreira",
@@ -9,5 +9,25 @@
   },
   "homepage": "https://github.com/PedroHRFerreira/rods-sdk",
   "repository": "https://github.com/PedroHRFerreira/rods-sdk",
-  "keywords": ["codex", "skills", "repository-context", "agent-governance"]
+  "keywords": ["codex", "skills", "repository-context", "agent-governance"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "RODS SDK",
+        "shortDescription": "Project-specific skills and context for Codex",
+        "longDescription": "Plan and generate agent skills for a project with RODS, then use its local Context Engine for focused repository retrieval.",
+        "developerName": "Pedro Ferreira",
+        "category": "Productivity",
+        "capabilities": ["Read", "Write"],
+        "websiteURL": "https://github.com/PedroHRFerreira/rods-sdk",
+        "brandColor": "#122033",
+        "logo": "./assets/logo.png",
+        "composerIcon": "./assets/logo.png",
+        "defaultPrompt": [
+          "Plan RODS skills for this project.",
+          "Find relevant project context with RODS."
+        ]
+      }
+    }
+  }
 }

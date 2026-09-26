@@ -1,6 +1,6 @@
 {
   "name": "rods-sdk",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Plan project-specific agent skills and use the RODS Context Engine in Codex.",
   "author": {
     "name": "Pedro Ferreira",
@@ -15,8 +15,12 @@
     "longDescription": "Plan and generate agent skills for a project with RODS, then use its local Context Engine for focused repository retrieval.",
     "developerName": "Pedro Ferreira",
     "category": "Productivity",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
     "websiteURL": "https://github.com/PedroHRFerreira/rods-sdk",
+    "brandColor": "#122033",
     "logo": "./assets/logo.png",
     "composerIcon": "./assets/logo.png",
     "defaultPrompt": [
