@@ -34,11 +34,17 @@ e o portal exige um endpoint HTTPS público para submissões com MCP.
 
 ## Casos de teste positivos
 
-1. **Prompt:** “Initialize RODS for this Node project and plan its agent skills.” **Esperado:** Seleciona `rods-init`, confirma a raiz do projeto, verifica CLI/Node e executa o fluxo interativo quando houver terminal; mostra as skills propostas antes de gravar. **Fixture:** repositório Git público de exemplo com `package.json`, Node 20+ e CLI instalada.
-2. **Prompt:** “Preview changes from updating RODS in this repository.” **Esperado:** Seleciona `rods-init`, executa `rods upgrade <root> --dry-run` e resume alterações sem sobrescrever skills customizadas. **Fixture:** projeto já inicializado pelo RODS.
-3. **Prompt:** “Check my Codex adapter for RODS.” **Esperado:** Seleciona `rods-init`, executa `rods adapter doctor <root> --target codex` e relata o estado. **Fixture:** projeto RODS inicializado.
-4. **Prompt:** “Use RODS to find where the API routes are registered.” **Esperado:** Seleciona `rods-context`, pesquisa via MCP ou CLI, lê chunks relevantes e cita caminhos de arquivo. **Fixture:** repositório indexado com rotas de API.
-5. **Prompt:** “Index this public sample repository with RODS, then find its build configuration.” **Esperado:** Seleciona `rods-context`, registra e indexa o projeto local quando necessário, busca a configuração e verifica os arquivos fonte. **Fixture:** repositório público local, CLI instalada.
+Fixture reproduzível: clone público de `https://github.com/PedroHRFerreira/rods-sdk`
+em diretório temporário, Node.js 20+ e `@pedrohrferreira/rods-sdk@0.2.1`.
+Para os casos de projeto já inicializado, execute `rods init <clone> --no-plan`
+antes do teste. O primeiro caso requer terminal interativo e uma CLI de modelo
+configurada; se isso não estiver disponível, avalie o fallback documentado.
+
+1. **Prompt:** “Initialize RODS for this Node project and plan its agent skills.” **Esperado:** Seleciona `rods-init`, confirma a raiz, verifica CLI/Node e inicia o wizard quando há terminal interativo. **Saída:** plano e prévia de arquivos para aprovação; em terminal sem TTY, aviso explícito sobre scaffold determinístico. **Fixture:** clone limpo e terminal interativo.
+2. **Prompt:** “Preview changes from updating RODS in this repository.” **Esperado:** Seleciona `rods-init` e executa `rods upgrade <root> --dry-run`. **Saída:** lista dos arquivos que mudariam, sem escrita. **Fixture:** clone já inicializado.
+3. **Prompt:** “Check my Codex adapter for RODS.” **Esperado:** Seleciona `rods-init` e executa `rods adapter doctor <root> --target codex`. **Saída:** estado de cada adapter, incluindo configuração ausente quando aplicável. **Fixture:** clone já inicializado.
+4. **Prompt:** “Use RODS to find where CLI commands are registered.” **Esperado:** Seleciona `rods-context`, pesquisa via MCP ou CLI e verifica os chunks nos arquivos fonte. **Saída:** caminhos e explicação baseada em `src/cli.ts` e comandos relacionados. **Fixture:** clone indexado.
+5. **Prompt:** “Index this repository with RODS, then find its build configuration.” **Esperado:** Seleciona `rods-context`, registra e indexa o clone se necessário e busca a configuração. **Saída:** referência ao `package.json` e ao `tsconfig.json`, com resumo verificado. **Fixture:** clone limpo.
 
 ## Casos de teste negativos
 
