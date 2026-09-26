@@ -88,3 +88,12 @@ test('flow CLI text mode prints narrative summaries before technical steps', asy
   assert.match(result.stdout, /step=review agent=claude/);
   assert.ok(result.stdout.indexOf('1: codex desenvolveu') < result.stdout.indexOf('step=develop'));
 });
+
+test('flow removes the temporary worktree when database initialization fails', async () => {
+  const fixture = await flowFixture();
+  const invalidHome = path.join(fixture.root, 'not-a-directory');
+  await fs.writeFile(invalidHome, 'file');
+  const result = await runFlow({ root: fixture.root, contextHome: invalidHome, json: false });
+  assert.notEqual(result.code, 0);
+  assert.equal(git(fixture.root, ['worktree', 'list', '--porcelain']).split('\n').filter((line) => line.startsWith('worktree ')).length, 1);
+});

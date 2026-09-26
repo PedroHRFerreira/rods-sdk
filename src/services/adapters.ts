@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copyFileIfAllowed, pathExists, writeTemplateFile, type IFileWriteResult } from './scaffold.js';
+import { sha256 } from '../utils/hash.js';
 
 export const ADAPTER_NAMES = ['rtk', 'claude-mem', 'caveman'] as const;
 export const ADAPTER_TARGET_IDS = ['codex', 'claude'] as const;
@@ -56,7 +57,9 @@ export interface IGovernanceConfig {
     testCommand?: IWorkflowTestCommand;
     reviewContext: boolean;
   };
+  decisionRouter?: { enabled: boolean; provider: 'vercel'; minConfidence: number; timeoutMs: number };
   generatedTemplates?: Record<string, string>;
+  projectedSkills?: Record<string, string>;
   generatedScripts?: Record<string, string>;
 }
 
@@ -310,6 +313,9 @@ async function trySyncCodexTarget(
   options: IAdapterSyncOptions
 ): Promise<{ ok: true; files: IFileWriteResult[] } | { ok: false; reason: string }> {
   const files: IFileWriteResult[] = [];
+  const configPath = path.join(root, '.ai', 'config.json');
+  const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as IGovernanceConfig;
+  const projected = { ...(config.projectedSkills ?? {}) };
 
   const entries = await fs.readdir(sourceSkillsDir, { withFileTypes: true });
 
@@ -325,15 +331,34 @@ async function trySyncCodexTarget(
         continue;
       }
 
-      files.push(
-        await copyFileIfAllowed(sourceSkill, path.join(destinationSkillsDir, entry.name, 'SKILL.md'), {
-          force: options.force
-        })
-      );
+      const destination = path.join(destinationSkillsDir, entry.name, 'SKILL.md');
+      const key = relativeFromRoot(root, destination);
+      const sourceHash = sha256(await fs.readFile(sourceSkill));
+      const exists = await pathExists(destination);
+      const currentHash = exists ? sha256(await fs.readFile(destination)) : null;
+      if (exists && currentHash === sourceHash) { files.push({ path: destination, status: 'unchanged' }); projected[key] = sourceHash; continue; }
+      if (exists && !options.force && currentHash !== projected[key]) { files.push({ path: destination, status: 'customized' }); continue; }
+      files.push(await copyFileIfAllowed(sourceSkill, destination, { force: true }));
+      projected[key] = sourceHash;
+    }
+
+    for (const [key, hash] of Object.entries(projected)) {
+      const destination = path.resolve(root, key);
+      const relative = path.relative(destinationSkillsDir, destination);
+      if (relative.startsWith('..') || path.isAbsolute(relative) || !relative.endsWith(`${path.sep}SKILL.md`)) continue;
+      const source = path.join(sourceSkillsDir, relative);
+      if (await pathExists(source) || !(await pathExists(destination))) continue;
+      if (sha256(await fs.readFile(destination)) === hash) {
+        await fs.unlink(destination);
+        delete projected[key];
+        files.push({ path: destination, status: 'removed' });
+      } else files.push({ path: destination, status: 'customized' });
     }
 
     files.push(await writeTargetHook(root, TARGET_REGISTRY.codex, options));
     await writeLifecycleHooks(root, 'codex');
+    config.projectedSkills = projected;
+    await fs.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
   } catch (error) {
     return { ok: false, reason: formatSyncError(error) };
   }
@@ -423,7 +448,8 @@ export async function loadGovernanceConfig(root: string): Promise<IGovernanceCon
       ...defaults.adapters,
       ...(parsed.adapters ?? {})
     },
-    workflow: { ...defaults.workflow!, ...(parsed.workflow ?? {}) }
+    workflow: { ...defaults.workflow!, ...(parsed.workflow ?? {}) },
+    decisionRouter: { ...defaults.decisionRouter!, ...(parsed.decisionRouter ?? {}) }
   };
 }
 
@@ -480,7 +506,8 @@ function createDefaultConfig(root: string): IGovernanceConfig {
       rulesDir: 'spec',
       mode: 'advisory'
     },
-    workflow: { mode: 'codex', maxIterations: 3, failOnSeverity: 'high', reviewContext: false }
+    workflow: { mode: 'codex', maxIterations: 3, failOnSeverity: 'high', reviewContext: false },
+    decisionRouter: { enabled: false, provider: 'vercel', minConfidence: 0.8, timeoutMs: 10000 }
   };
 }
 

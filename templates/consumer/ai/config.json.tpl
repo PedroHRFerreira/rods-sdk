@@ -63,5 +63,11 @@
     "failOnSeverity": "high",
     "reviewContext": false
   },
+  "decisionRouter": {
+    "enabled": false,
+    "provider": "vercel",
+    "minConfidence": 0.8,
+    "timeoutMs": 10000
+  },
   "generatedTemplates": {}
 }

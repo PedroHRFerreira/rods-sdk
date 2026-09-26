@@ -100,6 +100,25 @@ test('syncAdapters can project Codex skills to a custom directory', async () => 
   assert.match(syncedSkill, /Context Search First/);
 });
 
+test('syncAdapters refreshes generated projections but preserves customized copies', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-refresh-'));
+  const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-codex-home-'));
+  await initProject(root);
+  const options = { codexSkillsDir: '.codex/skills', codexHome };
+  await syncAdapters(root, 'codex', options);
+  const source = path.join(root, '.ai', 'skills', 'quality', 'SKILL.md');
+  const target = path.join(root, '.codex', 'skills', 'quality', 'SKILL.md');
+  await fs.appendFile(source, '\nProject test command: npm test\n');
+  const updated = await syncAdapters(root, 'codex', options);
+  assert.ok(updated.files.some((file) => file.path === target && file.status === 'overwritten'));
+  assert.match(await fs.readFile(target, 'utf8'), /Project test command/);
+  await fs.appendFile(target, '\nUser customization\n');
+  await fs.appendFile(source, '\nAnother upstream change\n');
+  const preserved = await syncAdapters(root, 'codex', options);
+  assert.ok(preserved.files.some((file) => file.path === target && file.status === 'customized'));
+  assert.doesNotMatch(await fs.readFile(target, 'utf8'), /Another upstream change/);
+});
+
 test('syncAdapters respects configured Codex skills directory', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-sync-configured-'));
   const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'context-adapter-codex-home-'));

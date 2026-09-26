@@ -21,6 +21,7 @@ import {
 } from '../services/flow-review.js';
 import { formatContextSnippets, formatRecurringPatterns } from '../services/formatting-compact.js';
 import { buildCorrectionDeveloperPrompt, buildInitialDeveloperPrompt, buildReviewPrompt } from '../utils/prompt-templates.js';
+import { routeWithJev } from '../services/jev-router.js';
 
 type FlowMode = string;
 type IterationOutcome = 'gate_failed' | 'changes_requested' | 'approved' | 'max_iterations';
@@ -101,21 +102,36 @@ export function registerFlowCommand(program: Command): void {
     });
 
   flow.command('run').argument('<task>').option('--mode <mode>').option('--root <path>', 'project root', '.').option('--json').action(async (task: string, options: { mode?: FlowMode; root: string; json?: boolean }) => {
-    const root = path.resolve(options.root); const config = await loadGovernanceConfig(root); const mode = options.mode ?? config.workflow?.mode ?? 'codex';
+    const root = path.resolve(options.root); const config = await loadGovernanceConfig(root); let mode = options.mode ?? config.workflow?.mode ?? 'codex';
     if (!isValidFlowMode(mode)) throw new Error(`Invalid flow mode: ${mode}`);
     if (!config.escalation?.enabled || config.escalation.mode !== 'execute') throw new Error('Enable escalation and set escalation.mode to "execute" before running agents');
     git(root, ['rev-parse','--show-toplevel']);
     const originalBranch = git(root, ['branch','--show-current']).trim(); const originalHead = git(root, ['rev-parse','HEAD']).trim();
     if (!originalBranch) throw new Error('rods flow run requires an active branch; detached HEAD cannot receive approved changes');
     const policy = await loadComplexityPolicy(root); let classification = classifyTask({ task, root, policy, preExecution: true });
+    const candidates = AGENT_TARGET_IDS.filter((agent) => config.targets[agent]?.enabled && config.targets[agent]?.execution && Object.values(config.targets[agent].execution.models).every((model) => typeof model === 'string' && model.trim()));
+    const routing = await routeWithJev({ task, config, candidates });
+    if (routing.decision) {
+      classification = { ...classification, level: routing.decision.tier, confidence: Math.min(routing.decision.confidence.tier, routing.decision.confidence.developer), reasons: [...classification.reasons, 'tier escolhido pelo Jev'], planningRequired: routing.decision.tier === 'high' };
+      if (!options.mode) { const reviewer = agents(mode)[1]; mode = routing.decision.developer === reviewer ? reviewer : `${routing.decision.developer}+${reviewer}`; }
+    }
+    announce(`routing=${routing.reason} tier=${classification.level} mode=${mode}`);
     const [developer, reviewer] = agents(mode); const maxIterations = config.workflow?.maxIterations ?? 3; const failOnSeverity = config.workflow?.failOnSeverity ?? 'high';
     if (!Number.isSafeInteger(maxIterations) || maxIterations < 1) throw new Error('workflow.maxIterations must be >= 1');
     if (failOnSeverity !== 'high' && failOnSeverity !== 'medium') throw new Error('workflow.failOnSeverity must be high or medium');
-    preflightFlowExecution(config, developer, reviewer, classification.level);
+    for (const tier of ['simple', 'medium', 'high'] as ComplexityLevel[]) preflightFlowExecution(config, developer, reviewer, tier);
     const id = randomUUID(); const short = id.slice(0, 8); const worktree = path.join(os.tmpdir(), `rods-flow-${short}`); const branch = `rods-flow/${short}`; const patchPath = path.join(os.tmpdir(), `rods-flow-${short}.patch`);
     git(root, ['worktree','add','-b',branch,worktree,'HEAD']);
-    const db = new ContextDatabase(loadConfig()); const project = db.findProjectForPath(root) ?? db.upsertProject(path.basename(root), root);
-    db.createFlowRun({ id, projectId: project.id, task: compactTask(task), mode, tier: classification.level, status: 'running', worktreePath: worktree });
+    let db!: ContextDatabase; let project: ReturnType<ContextDatabase['upsertProject']>;
+    try {
+      db = new ContextDatabase(loadConfig());
+      project = db.findProjectForPath(root) ?? db.upsertProject(path.basename(root), root);
+      db.createFlowRun({ id, projectId: project.id, task: compactTask(task), mode, tier: classification.level, status: 'running', worktreePath: worktree });
+    } catch (cause) {
+      if (db) db.close();
+      try { git(root, ['worktree', 'remove', '--force', worktree]); git(root, ['branch', '-D', branch]); } catch { /* preserve original failure */ }
+      throw cause;
+    }
     let status = 'failed', iterations = 0, review: ReviewResult | undefined, error: string | undefined;
     const usage: Array<{ phase: string; agent: AgentTarget; inputTokens: number | null; outputTokens: number | null; durationMs: number }> = [];
     const iterationSummaries: string[] = [];
@@ -140,7 +156,11 @@ export function registerFlowCommand(program: Command): void {
           db.addFlowStep({ runId: id, phase, agent: developer, model: execution(config, developer).models[phaseTier], status: 'completed', durationMs: result.durationMs, inputTokens: result.inputTokens, outputTokens: result.outputTokens, exitCode: result.exitCode, summary: result.output.slice(0, 2000) });
         } catch (cause) { recordFailure(phase, developer, cause, started); throw cause; }
 
-        if (iterations === 1) classification = classifyTask({ task, root: worktree, policy });
+        if (iterations === 1) {
+          const observed = classifyTask({ task, root: worktree, policy });
+          const order: ComplexityLevel[] = ['simple', 'medium', 'high'];
+          classification = { ...observed, level: order[Math.max(order.indexOf(classification.level), order.indexOf(observed.level))] };
+        }
 
         let bundle = buildReviewDiff(worktree);
         recurring = recurringForFiles(db, project.id, bundle.touchedFiles);
@@ -202,7 +222,7 @@ export function registerFlowCommand(program: Command): void {
       db.finishFlowRun(id, { status, tier: classification.level, patchPath, iterations: Math.min(iterations, maxIterations) });
       const knownInputTokens = usage.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0); const knownOutputTokens = usage.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0); const unavailableSteps = usage.filter((item) => item.inputTokens === null || item.outputTokens === null).length;
       const reviewMetrics = { reviewsExecuted, reviewsAvoidedByGate, omittedFiles: [...omittedFiles], snippetsUsed, findingsConsulted, findingComparisons };
-      const output = { id, status, tier: classification.level, mode, iterations: Math.min(iterations, maxIterations), worktree: status === 'approved' && !cleanupError ? null : worktree, branch: status === 'approved' && !cleanupError ? null : branch, patchPath, appliedTo, applied, cleanupError, review, usage, reviewMetrics, totals: { knownInputTokens, knownOutputTokens, unavailableSteps } };
+      const output = { id, status, tier: classification.level, mode, routing: { source: routing.decision ? 'jev' : 'rules', reason: routing.reason, confidence: routing.decision?.confidence ?? null, usage: routing.decision?.usage ?? null }, iterations: Math.min(iterations, maxIterations), worktree: status === 'approved' && !cleanupError ? null : worktree, branch: status === 'approved' && !cleanupError ? null : branch, patchPath, appliedTo, applied, cleanupError, review, usage, reviewMetrics, totals: { knownInputTokens, knownOutputTokens, unavailableSteps } };
       if (options.json) console.log(JSON.stringify(output)); else { console.log(`run=${id} status=${status} tier=${classification.level} iterations=${output.iterations}`); for (const summary of iterationSummaries) console.log(`  ${summary}`); for (const item of usage) console.log(`step=${item.phase} agent=${item.agent} inputTokens=${item.inputTokens ?? 'unavailable'} outputTokens=${item.outputTokens ?? 'unavailable'} durationMs=${item.durationMs}`); console.log(`reviewsExecuted=${reviewsExecuted} reviewsAvoidedByGate=${reviewsAvoidedByGate} snippetsUsed=${snippetsUsed} findingsConsulted=${findingsConsulted} findingComparisons=${findingComparisons}`); console.log(`knownInputTokens=${knownInputTokens} knownOutputTokens=${knownOutputTokens} unavailableSteps=${unavailableSteps}`); if (appliedTo) console.log(`appliedTo=${appliedTo} changes=${applied ? 'applied' : 'none'}`); if (cleanupError) { console.log(`worktree=${worktree}`); console.log(`cleanupError=${JSON.stringify(cleanupError)}`); } console.log(`patch=${patchPath}`); if (status !== 'approved') { console.log(`worktree=${worktree}`); console.log(`apply=git apply ${JSON.stringify(patchPath)}`); } if (review && !review.approved) for (const finding of review.findings) console.log(`finding=${finding.severity}:${finding.message}`); }
       if (status !== 'approved') process.exitCode = 2;
     } catch (cause) {

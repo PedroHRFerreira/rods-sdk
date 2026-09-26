@@ -1,6 +1,6 @@
 # Usando rods-sdk Com Codex
 
-O Rods SDK permite rodar o Context Engine como servidor MCP local para o Codex buscar memória indexada do projeto antes de abrir arquivos. O RTK é o adaptador padrão para compactar saída de comandos, mas sua instalação continua externa e opcional. A execução permanece CLI-first por Codex, MCP, skills e adaptadores locais; o rods-sdk não chama APIs de provedores de IA diretamente.
+O Rods SDK permite rodar o Context Engine como servidor MCP local para o Codex buscar memória indexada do projeto antes de abrir arquivos. O RTK é o adaptador padrão para compactar saída de comandos, mas sua instalação continua externa e opcional. A execução de agentes permanece CLI-first por Codex, MCP, skills e adaptadores locais; uma consulta direta ao Jev pode ser ativada separadamente para roteamento.
 
 ## Fluxo
 
@@ -83,12 +83,11 @@ Dentro do projeto que deve carregar a governança do rods-sdk:
 
 ```bash
 pnpm exec rods init
-pnpm exec rods adapter sync --target codex
 ```
 
-Isso cria `.ai/` como fonte versionada da verdade e sincroniza `.ai/skills/*/SKILL.md` para `.agents/skills/` quando o diretório for gravável.
+Em terminal interativo, `rods init` planeja e gera skills com a CLI escolhida pelo usuário e sincroniza o target Codex ao final. Sem terminal interativo, cria a base determinística. `.ai/skills` é a fonte versionada; a sincronização padrão mantém as skills nesse diretório.
 
-Se `.agents/skills` estiver somente leitura, use um destino gravável:
+Se precisar de uma projeção física para o Codex, use um destino gravável:
 
 ```bash
 pnpm exec rods adapter sync --target codex --codex-skills-dir .codex/skills

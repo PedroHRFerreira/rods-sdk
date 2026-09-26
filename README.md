@@ -8,7 +8,7 @@ O Rods SDK entrega uma camada operacional pequena e auditável para agentes:
 - RTK por padrão: compactação de saída de comandos, testes, logs e diffs.
 - Skills e arquivos de governança: regras versionadas em `.ai/` que podem ser sincronizadas com agentes suportados.
 - Adaptadores opcionais: memória entre sessões e modo de resposta curta sem virar dependência obrigatória.
-- Execução CLI-first: flows de agentes são disparados explicitamente pelo terminal e usam as CLIs locais, sem chamar APIs de provedores de IA diretamente. O MCP expõe somente o Context Engine, não o comando `flow run`.
+- Execução CLI-first: flows de agentes usam as CLIs locais. O roteador Jev é uma consulta externa opcional e desligada por padrão. O MCP expõe somente o Context Engine, não o comando `flow run`.
 
 ## Status — RODS Local-First MVP
 
@@ -25,8 +25,8 @@ contexto com orçamento; filtros de segredos e symlinks; worktree isolada;
 sanitização de artifacts; subprocessos controlados; validação opt-in; erros
 estruturados; e roteamento `--local-only` fail-closed com `cloudCalls = 0`.
 
-Na validação de 2026-09-14, `npm run typecheck`, `npm run build` e a suíte de
-89 testes passaram. O pacote 0.1.17 também foi empacotado e instalado em um
+Na validação anterior, `npm run typecheck`, `npm run build` e a suíte de
+testes passaram. O pacote também foi empacotado e instalado em um
 diretório limpo, com seus binários funcionando. Isso não é evidência de uma
 execução real por Magnitude e Codex.
 
@@ -173,6 +173,14 @@ Ele não habilita o Local-First E2E.
 rods init /caminho/para/meu-projeto
 ```
 
+Em terminal interativo, `rods init` abre uma conversa para planejar as skills.
+Ele pede a CLI e o modelo, apresenta um plano revisável e a prévia das skills,
+e só grava após confirmação. Arquivos ignorados e sensíveis ficam fora da
+cópia temporária analisada pela CLI. Sem terminal interativo ou com
+`--no-plan`, mantém o scaffold determinístico. A escolha do modelo vale
+apenas para essa geração. O assistente preserva skills personalizadas;
+`rods upgrade` não substitui as geradas pela IA.
+
 2. Indexe o projeto para que agentes possam recuperar contexto compacto antes
    de abrir arquivos:
 
@@ -211,10 +219,18 @@ aprovação, o comando mantém a worktree e informa o caminho do patch.
 
 ### Potência, limites e gastos
 
-O RODS não chama APIs de modelos diretamente (`execution.apiEnabled` é
+O RODS executa agentes pelas CLIs (`execution.apiEnabled` é
 `false`), mas suas CLIs autenticadas podem consumir assinatura, créditos ou
 tarifação do provedor. O SDK não conhece a tabela de preços da sua conta, não
 calcula moeda e não possui um teto financeiro por execução.
+
+Como exceção opt-in, `decisionRouter.enabled` permite consultar
+`typesafe-ai/jev` pelo Vercel AI Gateway antes de `rods flow run`. Defina
+`AI_GATEWAY_API_KEY` no ambiente e configure `minConfidence` e `timeoutMs` em
+`.ai/config.json`. Jev sugere o tier e o desenvolvedor; falhas e baixa
+confiança devolvem a decisão ao classificador local. `--mode` explícito
+mantém a escolha de agentes do usuário. Essa chamada pode ser cobrada pelo
+Gateway e não habilita `--local-only`.
 
 Em cada iteração há uma chamada de desenvolvimento. Se o gate de testes passar,
 há também uma chamada de revisão. Assim, o máximo de chamadas é
@@ -236,7 +252,7 @@ com modelos configurados para os três tiers, `workflow.testCommand`,
 potencial. Para um primeiro uso real, comece com uma iteração, confira os
 tokens reportados e aumente o limite conscientemente. O contexto de revisão é
 opt-in e limitado a cinco snippets; o diff enviado à revisão tem teto de
-50 mil caracteres.
+12 mil caracteres.
 
 ### Preparar Local-First
 
@@ -583,7 +599,7 @@ Cada adapter aplica o modo de permissão apropriado ao papel: Codex usa sandbox 
 
 Antes da chamada ao revisor, o flow executa `workflow.testCommand` sem shell, quando configurado. Falha, timeout ou binário ausente geram um finding `high` e evitam a chamada de LLM naquela iteração. Depois da resposta, `failOnSeverity` reconcilia `approved` com os próprios findings do modelo; por padrão, qualquer finding `high` bloqueia a aprovação.
 
-O diff de revisão mantém orçamento máximo de 50 mil caracteres sem cortar patches no meio. Arquivos omitidos são declarados no prompt e continuam disponíveis no worktree somente leitura. Findings históricos do mesmo arquivo são agrupados por overlap lexical mínimo de `0.50`; até três padrões recorrentes entram no prompt, e `rods flow findings --file <path>` permite consultá-los manualmente. A retenção/prune desse histórico permanece dívida explícita; o flow reporta quantos findings e comparações foram consultados.
+O diff de revisão mantém orçamento máximo de 12 mil caracteres sem cortar patches no meio. Arquivos omitidos são declarados no prompt e continuam disponíveis no worktree somente leitura. Findings históricos do mesmo arquivo são agrupados por overlap lexical mínimo de `0.50`; até três padrões recorrentes entram no prompt, e `rods flow findings --file <path>` permite consultá-los manualmente. A retenção/prune desse histórico permanece dívida explícita; o flow reporta quantos findings e comparações foram consultados.
 
 `workflow.reviewContext` é opt-in. Quando habilitado, o revisor recebe no máximo cinco snippets compactos do Context Engine, sempre filtrados pelo projeto atual e sem leitura de chunks completos. Ausência de índice é fail-open e fica registrada nos metadados da etapa.
 

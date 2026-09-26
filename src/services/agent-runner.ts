@@ -64,7 +64,7 @@ function usageFromGemini(value: unknown): { input: number | null; output: number
   return { input: foundInput ? input : null, output: foundOutput ? output : null };
 }
 
-function extractOutput(agent: AgentTarget, stdout: string): { output: string; usage: { input: number | null; output: number | null } } {
+export function extractOutput(agent: AgentTarget, stdout: string): { output: string; usage: { input: number | null; output: number | null } } {
   if (agent === 'gemini') {
     try {
       const envelope = JSON.parse(stdout) as Record<string, unknown>;
@@ -98,7 +98,7 @@ export async function runAgent(input: { agent: AgentTarget; config: IAgentExecut
     const child = spawn(input.config.binary, args, { cwd: input.cwd, stdio: ['pipe','pipe','pipe'] }); let stdout = '', stderr = '', settled = false;
     const finish = (error?: Error, code = -1) => { if (settled) return; settled = true; clearTimeout(timer); void fs.rm(schemaDir, { recursive: true, force: true }); if (error) { reject(error); return; } const parsed = extractOutput(input.agent, stdout); if (code !== 0) { reject(new Error(`${input.agent} exited ${code}: ${(stderr.trim() || parsed.output).slice(0, 4000)}`)); return; } try { const claimed = input.review ? ReviewSchema.parse(JSON.parse(parsed.output)) : undefined; const review = claimed ? enforceApproval(claimed, input.failOnSeverity) : undefined; resolve({ output: parsed.output, exitCode: code, durationMs: Date.now() - started, inputTokens: parsed.usage.input, outputTokens: parsed.usage.output, review, modelClaimedApproved: claimed?.approved }); } catch (cause) { reject(new Error(`Invalid structured review from ${input.agent}: ${cause instanceof Error ? cause.message : String(cause)}; output=${JSON.stringify(parsed.output.slice(0, 4000))}`)); } };
     const timer = setTimeout(() => { child.kill('SIGTERM'); finish(new Error(`${input.agent} timed out after ${input.config.timeoutMs}ms`)); }, input.config.timeoutMs);
-    child.stdout.on('data', (chunk) => { stdout += chunk; }); child.stderr.on('data', (chunk) => { stderr += chunk; }); child.stdin.on('error', (error: NodeJS.ErrnoException) => { if (error.code !== 'EPIPE') finish(error); }); child.on('error', (error) => finish(error)); child.on('close', (code) => finish(undefined, code ?? -1));
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); if (stdout.length > 2_000_000) { child.kill('SIGTERM'); finish(new Error(`${input.agent} output exceeded 2 MB`)); } }); child.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-16_000); }); child.stdin.on('error', (error: NodeJS.ErrnoException) => { if (error.code !== 'EPIPE') finish(error); }); child.on('error', (error) => finish(error)); child.on('close', (code) => finish(undefined, code ?? -1));
     if (input.agent === 'codex') child.stdin.end(input.prompt); else child.stdin.end();
   });
 }

@@ -12,7 +12,8 @@ export type FileWriteStatus =
   | 'would-create'
   | 'would-overwrite'
   | 'would-skip-customized'
-  | 'skipped-customized';
+  | 'skipped-customized'
+  | 'removed';
 
 export interface IFileWriteResult {
   path: string;
@@ -29,6 +30,7 @@ export interface IInitProjectOptions {
   force?: boolean;
   projectName?: string;
   dryRun?: boolean;
+  skillNames?: string[];
 }
 
 interface ITemplateMapping {
@@ -104,7 +106,7 @@ export async function initProject(root: string, options: IInitProjectOptions = {
 
   const results: IFileWriteResult[] = [];
 
-  for (const mapping of INIT_TEMPLATES) {
+  for (const mapping of INIT_TEMPLATES.filter((item) => !item.destination.startsWith('.ai/skills/') || !options.skillNames || options.skillNames.includes(path.basename(path.dirname(item.destination))))) {
     const destinationPath = path.join(resolvedRoot, mapping.destination);
     results.push(
       await writeTemplateFile(mapping.template, destinationPath, variables, {
@@ -174,7 +176,9 @@ export async function upgradeProject(root: string, options: IInitProjectOptions 
   const metadata = await readTemplateMetadata(resolvedRoot);
   const results: IFileWriteResult[] = [];
 
-  for (const mapping of INIT_TEMPLATES) {
+  const selectedSkills = await readSelectedSkills(resolvedRoot);
+  for (const mapping of INIT_TEMPLATES.filter((item) => !item.destination.startsWith('.ai/skills/') || !selectedSkills || selectedSkills.includes(path.basename(path.dirname(item.destination))))) {
+    if (mapping.destination.startsWith('.ai/skills/') && await isAiGeneratedSkill(resolvedRoot, mapping.destination)) continue;
     const destinationPath = path.join(resolvedRoot, mapping.destination);
     const content = renderTemplate(await readTemplate(mapping.template), variables);
     const nextHash = sha256(content);
@@ -210,6 +214,16 @@ export async function upgradeProject(root: string, options: IInitProjectOptions 
   }
 
   return results;
+}
+
+async function readSelectedSkills(root: string): Promise<string[] | null> {
+  const config = await readJsonFile(path.join(root, '.ai', 'config.json')) as { selectedSkills?: unknown } | null;
+  return Array.isArray(config?.selectedSkills) ? config.selectedSkills.filter((value): value is string => typeof value === 'string') : null;
+}
+
+async function isAiGeneratedSkill(root: string, relativePath: string): Promise<boolean> {
+  const config = await readJsonFile(path.join(root, '.ai', 'config.json')) as { aiGeneratedSkills?: Record<string, string> } | null;
+  return Boolean(config?.aiGeneratedSkills?.[relativePath]);
 }
 
 export async function upgradeProjectScripts(

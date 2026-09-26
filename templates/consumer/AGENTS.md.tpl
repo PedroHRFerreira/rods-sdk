@@ -9,7 +9,7 @@ Detected stack: {{stackLabel}}
 1. Run `context_engine.search` with task-specific terms.
 2. Read only relevant chunks with `context_engine.read`.
 3. Use RTK for shell commands when it is available, especially for `git`, tests, logs, diffs, and broad searches.
-4. Operate through the local harness/CLI, MCP tools, skills, and adapters. Do not call AI provider APIs directly from this framework.
+4. Operate through the local harness/CLI, MCP tools, skills, and adapters. Direct provider calls are limited to explicitly enabled decision adapters such as Jev.
 5. Fall back to local file reads only when the index is missing or stale.
 6. If fallback local reads solved the task, run `context_engine.ingest` on the relevant file or directory before finishing.
 7. If a card or link implies external dependencies, ask whether to proceed, only plan, or take another action before running Context Engine search.
